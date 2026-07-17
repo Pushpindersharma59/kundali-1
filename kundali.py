@@ -703,7 +703,10 @@ with col2:
     )
 
 with col3:
-    dob = st.date_input("Date of birth", value=date(2026, 7, 16))
+    dob = st.date_input(
+        "Date of birth", value=date(2026, 7, 16),
+        min_value=date(1900, 1, 1), max_value=date(2100, 12, 31),
+    )
 
 with col4:
     tob = st.time_input("Time (24h, local)", value=dtime(12, 16))
