@@ -393,7 +393,7 @@ def compute_chart(y: int, mo: int, dd: int, hh: int, mm: int, lat: float, lon: f
         lord_idx = (start_lord + i) % 9
         yrs = balance_years if i == 0 else DASHA_YEARS[lord_idx]
         end = cursor + timedelta(days=yrs * YEAR_DAYS)
-        dashas.append({"lord": DASHA_LORDS[lord_idx], "from": cursor, "to": end, "yrs": yrs})
+        dashas.append({"lord": DASHA_LORDS[lord_idx], "lordIdx": lord_idx, "from": cursor, "to": end, "yrs": yrs})
         cursor = end
 
     return {
@@ -410,6 +410,22 @@ def compute_chart(y: int, mo: int, dd: int, hh: int, mm: int, lat: float, lon: f
     }
 
 
+def compute_antardashas(maha_lord_idx: int, maha_start: datetime, maha_years: float):
+    """Vimśottarī antardaśā (sub-periods) within one mahādaśā.
+    Sequence starts at the mahādaśā's own lord and cycles through all 9 in order;
+    each sub-period's length is proportional to its lord's full dasha-years out of 120."""
+    YEAR_DAYS = 365.25
+    subs = []
+    cursor = maha_start
+    for i in range(9):
+        lord_idx = (maha_lord_idx + i) % 9
+        yrs = maha_years * DASHA_YEARS[lord_idx] / 120
+        end = cursor + timedelta(days=yrs * YEAR_DAYS)
+        subs.append({"lord": DASHA_LORDS[lord_idx], "from": cursor, "to": end, "yrs": yrs})
+        cursor = end
+    return subs
+
+
 def now_in_city(tz: float) -> datetime:
     """UTC 'now' shifted into the city's local wall-clock time (naive datetime)."""
     return datetime.utcnow() + timedelta(hours=tz)
@@ -420,9 +436,9 @@ def now_in_city(tz: float) -> datetime:
 # ============================================================
 
 C = {
-    "bg": "#0D1124", "panel": "#161B36", "panelSoft": "#1B2142", "line": "#2B3260",
-    "gold": "#D9A441", "ivory": "#EAE4D3", "muted": "#959BC0", "sindoor": "#FF6B4A",
-    "moon": "#B9C4E0",
+    "bg": "#FAF7F0", "panel": "#FFFFFF", "panelSoft": "#FDF3E0", "line": "#E2D9C4",
+    "gold": "#B8842E", "ivory": "#3A2E1F", "muted": "#7A6F5C", "sindoor": "#C4462B",
+    "moon": "#3A5B8C",
 }
 
 HOUSE_CENTERS = [
@@ -447,16 +463,16 @@ def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int) -> str:
         retro_mark = "℞" if (x["retro"] and x["key"] not in ("Ra", "Ke")) else ""
         deg = math.floor(x["inSign"])
         return (
-            f'<text x="{cx}" y="{y}" text-anchor="middle" font-size="11.5" font-weight="600" '
-            f'fill="{fill}" font-family="Marcellus, serif">{x["key"]}'
-            f'<tspan font-size="8" fill="{sub_fill}" font-family="monospace">'
+            f'<text x="{cx}" y="{y}" text-anchor="middle" font-size="14" font-weight="700" '
+            f'fill="{fill}" font-family="Georgia, serif">{x["key"]}'
+            f'<tspan font-size="10" fill="{sub_fill}" font-family="monospace">'
             f' {deg}°{retro_mark}</tspan></text>'
         )
 
     parts = [
         '<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" style="max-width:560px;width:100%;">',
         '<defs><radialGradient id="cbg" cx="50%" cy="50%" r="70%">'
-        '<stop offset="0%" stop-color="#1D2450" /><stop offset="100%" stop-color="#12172F" />'
+        '<stop offset="0%" stop-color="#FFFDF7" /><stop offset="100%" stop-color="#F3EAD3" />'
         '</radialGradient></defs>',
         f'<rect x="2" y="2" width="396" height="396" fill="url(#cbg)" stroke="{C["gold"]}" stroke-width="2" />',
         f'<line x1="2" y1="2" x2="398" y2="398" stroke="{C["gold"]}" stroke-width="1" opacity="0.85" />',
@@ -469,10 +485,10 @@ def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int) -> str:
         sign_num = ((asc_sign + h) % 12) + 1
         b, t = by_house[h]["b"], by_house[h]["t"]
         n = len(b) + len(t)
-        step = 12.5
+        step = 14
         start_y = cy - ((n - 1) * step) / 2 + 4
         parts.append(
-            f'<text x="{cx}" y="{start_y - step - 2}" text-anchor="middle" font-size="8.5" '
+            f'<text x="{cx}" y="{start_y - step - 2}" text-anchor="middle" font-size="10" '
             f'fill="{C["muted"]}" font-family="monospace">{sign_num}</text>'
         )
         for i, x in enumerate(b):
@@ -493,22 +509,27 @@ st.set_page_config(page_title="Kuṇḍalī", page_icon="✨", layout="wide")
 st.markdown(
     f"""
     <style>
-    .stApp {{ background-color: {C["bg"]}; color: {C["ivory"]}; }}
+    .stApp {{ background-color: {C["bg"]}; color: {C["ivory"]}; font-size: 17px; }}
     .kcard {{
         background: {C["panel"]}; border: 1px solid {C["line"]};
-        border-radius: 10px; padding: 16px; margin-bottom: 16px;
+        border-radius: 12px; padding: 20px; margin-bottom: 18px;
+        box-shadow: 0 1px 4px rgba(58,46,31,0.06);
     }}
     .kcard h4 {{
-        color: {C["gold"]}; letter-spacing: 0.12em; font-size: 13px;
-        text-transform: uppercase; border-bottom: 1px solid {C["line"]};
-        padding-bottom: 8px; margin-bottom: 12px; font-family: Georgia, serif;
+        color: {C["gold"]}; letter-spacing: 0.10em; font-size: 17px;
+        text-transform: uppercase; border-bottom: 2px solid {C["line"]};
+        padding-bottom: 10px; margin-bottom: 14px; font-family: Georgia, serif;
+        font-weight: 700;
     }}
     .krow {{
-        display: flex; justify-content: space-between; padding: 6px 0;
-        border-bottom: 1px solid {C["line"]}; font-size: 14px;
+        display: flex; justify-content: space-between; padding: 9px 0;
+        border-bottom: 1px solid {C["line"]}; font-size: 17px;
     }}
     .kmuted {{ color: {C["muted"]}; }}
-    .ksindoor {{ color: {C["sindoor"]}; }}
+    .ksindoor {{ color: {C["sindoor"]}; font-weight: 600; }}
+    p, span, div, label {{ font-size: 17px; }}
+    .stDataFrame, .stDataFrame * {{ font-size: 16px !important; }}
+    h1 {{ font-size: 42px !important; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -516,7 +537,7 @@ st.markdown(
 
 st.markdown(
     f'<h1 style="color:{C["gold"]}; font-family:Georgia, serif; letter-spacing:0.06em;">Kuṇḍalī</h1>'
-    f'<p class="kmuted" style="margin-top:-10px;">Vedic birth-chart engine · Lahiri ayanamsa · Python build</p>',
+    f'<p class="kmuted" style="margin-top:-10px; font-size:18px;">Vedic birth-chart engine · Lahiri ayanamsa · Python build</p>',
     unsafe_allow_html=True,
 )
 
@@ -643,6 +664,7 @@ with c3:
             "Graha": b["name"] + (" ℞" if b["retro"] and b["key"] not in ("Ra", "Ke") else ""),
             "Birth sign": SIGNS[b["sign"]],
             "Degree": fmt_deg(b["inSign"]),
+            "Nakṣatra": f"{NAKSHATRAS[b['nakIdx']]} · pada {b['pada']}",
             "Transit now": (
                 f"{SIGNS[tdict[b['key']]['sign']]} {fmt_deg(tdict[b['key']]['inSign'])}"
                 + (" ℞" if tdict[b['key']]['retro'] and b['key'] not in ('Ra', 'Ke') else "")
@@ -674,10 +696,40 @@ with c4:
             unsafe_allow_html=True,
         )
     st.markdown(
-        '<p class="kmuted" style="font-size:12px;margin-top:10px;">'
+        '<p class="kmuted" style="font-size:14px;margin-top:10px;">'
         "Gold border = currently running mahādaśā. First period is the balance at birth.</p></div>",
         unsafe_allow_html=True,
     )
+
+    active_maha = next((d for d in birth_chart["dashas"] if d["from"] <= now_utc < d["to"]), None)
+    if active_maha:
+        st.markdown(
+            f'<div class="kcard"><h4>Antardaśā within {active_maha["lord"]} Mahādaśā</h4>',
+            unsafe_allow_html=True,
+        )
+        antardashas = compute_antardashas(active_maha["lordIdx"], active_maha["from"], active_maha["yrs"])
+        for a in antardashas:
+            active_a = a["from"] <= now_utc < a["to"]
+            style = (
+                f"background:{C['panelSoft']};border:1px solid {C['gold']};"
+                if active_a else "border:1px solid transparent;"
+            )
+            color = C["gold"] if active_a else C["ivory"]
+            st.markdown(
+                f'<div style="{style}border-radius:6px;padding:6px 10px;margin-bottom:4px;'
+                f'display:flex;justify-content:space-between;align-items:center;font-size:15px;">'
+                f'<span style="color:{color};font-weight:600;min-width:110px;">{a["lord"]}</span>'
+                f'<span class="kmuted" style="font-family:monospace;font-size:13px;flex:1;text-align:center;">'
+                f'{a["from"].strftime("%d %b %Y")} → {a["to"].strftime("%d %b %Y")}</span>'
+                f'<span class="kmuted" style="font-size:13px;">{a["yrs"]*12:.1f}mo</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            '<p class="kmuted" style="font-size:14px;margin-top:10px;">'
+            "Gold border = currently running antardaśā (sub-period).</p></div>",
+            unsafe_allow_html=True,
+        )
 
 st.markdown(
     '<p class="kmuted" style="font-size:12px;">Engine accuracy: Sun/Moon a few arc-minutes, '
