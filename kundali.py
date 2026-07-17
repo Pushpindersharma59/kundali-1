@@ -187,6 +187,14 @@ DASHA_LORDS = ["Ketu", "Śukra (Ve)", "Sūrya (Su)", "Candra (Mo)", "Maṅgala (
                "Rāhu", "Guru (Jp)", "Śani (Sa)", "Budha (Me)"]
 DASHA_YEARS = [7, 20, 6, 10, 7, 18, 16, 19, 17]
 
+# short 2-letter codes, in the same order as DASHA_LORDS (used for nakshatra-lord + dasha display)
+DASHA_LORD_SHORT = ["Ke", "Ve", "Su", "Mo", "Ma", "Ra", "Jp", "Sa", "Me"]
+
+SIGN_ABBR = ["Ar", "Ta", "Ge", "Cn", "Le", "Vi", "Li", "Sc", "Sg", "Cp", "Aq", "Pi"]
+
+# combustion orb in degrees (approx. classical values) — used only for the 🔥 marker
+COMBUSTION_ORB = {"Ma": 17, "Me": 14, "Jp": 11, "Ve": 10, "Sa": 15}
+
 # name, region, lat, lon, tz(hours)
 CITIES = [
     ("Bathinda", "Punjab, India", 30.21, 74.95, 5.5),
@@ -296,6 +304,72 @@ def fmt_deg(x: float) -> str:
     return f"{d}°{m:02d}′"
 
 
+def fmt_dms(x: float) -> str:
+    """Signed degrees -> D°M'S\" string (handles negative values for latitude/declination)."""
+    sign = "-" if x < 0 else ""
+    x = abs(x)
+    d = math.floor(x)
+    rem_m = (x - d) * 60
+    m = math.floor(rem_m)
+    s = round((rem_m - m) * 60)
+    if s == 60:
+        s = 0
+        m += 1
+    if m == 60:
+        m = 0
+        d += 1
+    return f'{sign}{d}°{m}\'{s}"'
+
+
+def moon_ecliptic_latitude(jd: float) -> float:
+    """Low-precision series (Meeus, ch.47) for the Moon's ecliptic latitude, in degrees."""
+    T = (jd - 2451545.0) / 36525
+    D = (297.8501921 + 445267.1114034 * T) * D2R
+    M = (357.5291092 + 35999.0502909 * T) * D2R
+    Mp = (134.9633964 + 477198.8675055 * T) * D2R
+    F = (93.272095 + 483202.0175233 * T) * D2R
+    beta = (
+        5.128122 * math.sin(F)
+        + 0.280602 * math.sin(Mp + F)
+        + 0.277693 * math.sin(Mp - F)
+        + 0.173237 * math.sin(2 * D - F)
+        + 0.055413 * math.sin(2 * D + F - Mp)
+        + 0.046271 * math.sin(2 * D - F - Mp)
+        + 0.032573 * math.sin(2 * D + F)
+        + 0.017198 * math.sin(2 * Mp + F)
+        + 0.009266 * math.sin(2 * D + Mp - F)
+        + 0.008822 * math.sin(2 * D - F - 2 * Mp)
+        + 0.008216 * math.sin(2 * D - M - F)
+        + 0.004324 * math.sin(2 * D - F - 2 * Mp)
+    )
+    return beta
+
+
+def geo_ecliptic_lat(name: str, jd: float) -> float:
+    px, py, pz = helio_position(name, jd)
+    ex, ey, ez = helio_position("Earth", jd)
+    gx, gy, gz = px - ex, py - ey, pz - ez
+    return math.atan2(gz, math.sqrt(gx * gx + gy * gy)) / D2R
+
+
+def declination(lon_trop_deg: float, lat_ecl_deg: float, jd: float) -> float:
+    """Ecliptic (tropical longitude, latitude) -> equatorial declination, in degrees."""
+    T = (jd - 2451545.0) / 36525
+    eps = (23.4392911 - 0.013004 * T) * D2R
+    lam = lon_trop_deg * D2R
+    bet = lat_ecl_deg * D2R
+    dec = math.asin(math.sin(bet) * math.cos(eps) + math.cos(bet) * math.sin(eps) * math.sin(lam))
+    return dec / D2R
+
+
+def chara_karaka(degrees_in_sign: dict) -> dict:
+    """Classical 8-Kāraka scheme (includes Rāhu with reversed degree, excludes Ketu).
+    Ranks by degree-within-sign, highest -> AK ... lowest -> DK."""
+    names = ["AK", "AmK", "BK", "MK", "PiK", "PK", "GK", "DK"]
+    ranked = sorted(degrees_in_sign.items(), key=lambda kv: kv[1], reverse=True)
+    return {key: names[i] for i, (key, _) in enumerate(ranked)}
+
+
 # ============================================================
 # CHART COMPUTATION
 # ============================================================
@@ -312,11 +386,14 @@ def compute_chart(y: int, mo: int, dd: int, hh: int, mm: int, lat: float, lon: f
     rahu_sid = norm360(mean_node(jd) - ayan_date)
     ketu_sid = norm360(rahu_sid + 180)
 
-    planet_sid, planet_retro = {}, {}
+    planet_sid, planet_retro, planet_trop, planet_lat, planet_dec = {}, {}, {}, {}, {}
     for p in ["Mercury", "Venus", "Mars", "Jupiter", "Saturn"]:
         l1 = geo_longitude(p, jd)
         l2 = geo_longitude(p, jd + 0.5)
         planet_sid[p] = norm360(l1 - AYAN_J2000)
+        planet_trop[p] = l1
+        planet_lat[p] = geo_ecliptic_lat(p, jd)
+        planet_dec[p] = declination(l1, planet_lat[p], jd)
         diff = l2 - l1
         if diff > 180:
             diff -= 360
@@ -326,21 +403,34 @@ def compute_chart(y: int, mo: int, dd: int, hh: int, mm: int, lat: float, lon: f
 
     asc_sid = norm360(ascendant(jd, lat, lon) - ayan_date)
 
+    rahu_trop = mean_node(jd)
+    ketu_trop = norm360(rahu_trop + 180)
+    moon_lat = moon_ecliptic_latitude(jd)
+    sun_dec = declination(sun_trop, 0.0, jd)
+    moon_dec = declination(moon_trop, moon_lat, jd)
+    rahu_dec = declination(rahu_trop, 0.0, jd)
+    ketu_dec = declination(ketu_trop, 0.0, jd)
+
     raw_bodies = [
-        ("As", "Lagna (Asc)", asc_sid, False),
-        ("Su", "Sūrya (Sun)", sun_sid, False),
-        ("Mo", "Candra (Moon)", moon_sid, False),
-        ("Ma", "Maṅgala (Mars)", planet_sid["Mars"], planet_retro["Mars"]),
-        ("Me", "Budha (Mercury)", planet_sid["Mercury"], planet_retro["Mercury"]),
-        ("Jp", "Guru (Jupiter)", planet_sid["Jupiter"], planet_retro["Jupiter"]),
-        ("Ve", "Śukra (Venus)", planet_sid["Venus"], planet_retro["Venus"]),
-        ("Sa", "Śani (Saturn)", planet_sid["Saturn"], planet_retro["Saturn"]),
-        ("Ra", "Rāhu", rahu_sid, True),
-        ("Ke", "Ketu", ketu_sid, True),
+        ("As", "Lagna (Asc)", asc_sid, False, 0.0, 0.0),
+        ("Su", "Sūrya (Sun)", sun_sid, False, 0.0, sun_dec),
+        ("Mo", "Candra (Moon)", moon_sid, False, moon_lat, moon_dec),
+        ("Ma", "Maṅgala (Mars)", planet_sid["Mars"], planet_retro["Mars"],
+         planet_lat["Mars"], planet_dec["Mars"]),
+        ("Me", "Budha (Mercury)", planet_sid["Mercury"], planet_retro["Mercury"],
+         planet_lat["Mercury"], planet_dec["Mercury"]),
+        ("Jp", "Guru (Jupiter)", planet_sid["Jupiter"], planet_retro["Jupiter"],
+         planet_lat["Jupiter"], planet_dec["Jupiter"]),
+        ("Ve", "Śukra (Venus)", planet_sid["Venus"], planet_retro["Venus"],
+         planet_lat["Venus"], planet_dec["Venus"]),
+        ("Sa", "Śani (Saturn)", planet_sid["Saturn"], planet_retro["Saturn"],
+         planet_lat["Saturn"], planet_dec["Saturn"]),
+        ("Ra", "Rāhu", rahu_sid, True, 0.0, rahu_dec),
+        ("Ke", "Ketu", ketu_sid, True, 0.0, ketu_dec),
     ]
 
     bodies = []
-    for key, name, lon_, retro in raw_bodies:
+    for key, name, lon_, retro, lat_ecl, dec in raw_bodies:
         sign = math.floor(lon_ / 30)
         in_sign = lon_ - sign * 30
         nak_idx = math.floor(lon_ / (360 / 27))
@@ -348,7 +438,30 @@ def compute_chart(y: int, mo: int, dd: int, hh: int, mm: int, lat: float, lon: f
         bodies.append({
             "key": key, "name": name, "lon": lon_, "retro": retro,
             "sign": sign, "inSign": in_sign, "nakIdx": nak_idx, "pada": pada,
+            "lat": lat_ecl, "dec": dec,
         })
+
+    # ---- Chara Kāraka (8-body scheme: Su,Mo,Ma,Me,Jp,Ve,Sa,Ra — Rāhu reversed, Ketu excluded)
+    body_by_key = {b["key"]: b for b in bodies}
+    karaka_degrees = {}
+    for k in ["Su", "Mo", "Ma", "Me", "Jp", "Ve", "Sa"]:
+        karaka_degrees[k] = body_by_key[k]["inSign"]
+    karaka_degrees["Ra"] = 30.0 - body_by_key["Ra"]["inSign"]
+    karaka_map = chara_karaka(karaka_degrees)
+    for b in bodies:
+        b["karaka"] = karaka_map.get(b["key"])
+
+    # ---- Combustion (within classical orb of the Sun, tropical longitudes)
+    combust_trop = {"Ma": planet_trop.get("Mars"), "Me": planet_trop.get("Mercury"),
+                     "Jp": planet_trop.get("Jupiter"), "Ve": planet_trop.get("Venus"),
+                     "Sa": planet_trop.get("Saturn")}
+    for b in bodies:
+        if b["key"] in combust_trop:
+            diff = abs(norm360(combust_trop[b["key"]] - sun_trop))
+            diff = min(diff, 360 - diff)
+            b["combust"] = diff <= COMBUSTION_ORB[b["key"]]
+        else:
+            b["combust"] = False
 
     elong = norm360(moon_trop - sun_trop)
     tithi_idx = math.floor(elong / 12)
@@ -531,6 +644,15 @@ st.markdown(
     p, span, div, label {{ font-size: 17px; }}
     .stDataFrame, .stDataFrame * {{ font-size: 16px !important; }}
     h1 {{ font-size: 42px !important; }}
+    .gtable {{ width: 100%; border-collapse: collapse; font-size: 16px; }}
+    .gtable th {{
+        text-align: left; color: {C["gold"]}; font-weight: 700; text-decoration: underline;
+        padding: 6px 10px; border-bottom: 2px solid {C["line"]}; white-space: nowrap;
+    }}
+    .gtable td {{ padding: 7px 10px; border-bottom: 1px solid {C["line"]}; white-space: nowrap; }}
+    .gtable tr:nth-child(even) {{ background: {C["panelSoft"]}; }}
+    .gtable .lord {{ color: {C["sindoor"]}; font-weight: 600; }}
+    .gtable .body-key {{ font-weight: 700; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -639,10 +761,12 @@ with c1:
 with c2:
     st.markdown('<div class="kcard"><h4>Nakṣatra · birth</h4>', unsafe_allow_html=True)
     nak_rows = "".join(
-        f'<div class="krow"><span class="kmuted">{b["name"].split(" (")[0]}</span>'
-        f'<span style="text-align:right;">{NAKSHATRAS[b["nakIdx"]]}<br>'
-        f'<span class="kmuted" style="font-size:13px;">pada {b["pada"]}</span></span></div>'
-        for b in birth_chart["bodies"] if b["key"] != "As"
+        f'<div class="krow"><span class="kmuted body-key">{b["key"]}</span>'
+        f'<span style="text-align:right;">{NAKSHATRAS[b["nakIdx"]]}'
+        f'<span class="kmuted">({b["nakIdx"]+1})</span> '
+        f'<span class="lord ksindoor">{DASHA_LORD_SHORT[b["nakIdx"] % 9]}</span>'
+        f'<br><span class="kmuted" style="font-size:13px;">pada {b["pada"]}</span></span></div>'
+        for b in birth_chart["bodies"]
     )
     st.markdown(nak_rows, unsafe_allow_html=True)
     st.markdown(
@@ -655,59 +779,41 @@ with c2:
 c3, c4 = st.columns([1, 1])
 
 with c3:
-    st.markdown('<div class="kcard"><h4>Vimśottarī Mahādaśā</h4>', unsafe_allow_html=True)
-    for d in birth_chart["dashas"]:
-        active = d["from"] <= now_utc < d["to"]
-        style = (
-            f"background:{C['panelSoft']};border:1px solid {C['gold']};"
-            if active else "border:1px solid transparent;"
-        )
-        color = C["gold"] if active else C["ivory"]
-        st.markdown(
-            f'<div style="{style}border-radius:6px;padding:7px 10px;margin-bottom:4px;'
-            f'display:flex;justify-content:space-between;align-items:center;font-size:15px;">'
-            f'<span style="color:{color};font-weight:600;min-width:110px;">{d["lord"]}</span>'
-            f'<span class="kmuted" style="font-family:monospace;font-size:13px;flex:1;text-align:center;">'
-            f'{d["from"].strftime("%d %b %Y")} → {d["to"].strftime("%d %b %Y")}</span>'
-            f'<span class="kmuted" style="font-size:13px;">{d["yrs"]:.1f}y</span>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+    moon_nak_idx = birth_chart["panchanga"]["nakIdx"]
     st.markdown(
-        '<p class="kmuted" style="font-size:13px;margin-top:10px;">'
-        "Gold border = currently running mahādaśā. First period is the balance at birth.</p></div>",
+        f'<div class="kcard"><h4>Viṁśottarī Daśā</h4>'
+        f'<p class="kmuted" style="margin-bottom:10px;">Starting Tārā '
+        f'<span class="ksindoor">Mo</span> ({NAKSHATRAS[moon_nak_idx]})</p>',
         unsafe_allow_html=True,
     )
-
-    active_maha = next((d for d in birth_chart["dashas"] if d["from"] <= now_utc < d["to"]), None)
-    if active_maha:
-        st.markdown(
-            f'<div class="kcard"><h4>Antardaśā within {active_maha["lord"]}</h4>',
-            unsafe_allow_html=True,
-        )
-        antardashas = compute_antardashas(active_maha["lordIdx"], active_maha["from"], active_maha["yrs"])
-        for a in antardashas:
-            active_a = a["from"] <= now_utc < a["to"]
-            style = (
-                f"background:{C['panelSoft']};border:1px solid {C['gold']};"
-                if active_a else "border:1px solid transparent;"
-            )
-            color = C["gold"] if active_a else C["ivory"]
-            st.markdown(
-                f'<div style="{style}border-radius:6px;padding:6px 10px;margin-bottom:4px;'
-                f'display:flex;justify-content:space-between;align-items:center;font-size:14px;">'
-                f'<span style="color:{color};font-weight:600;min-width:110px;">{a["lord"]}</span>'
-                f'<span class="kmuted" style="font-family:monospace;font-size:12px;flex:1;text-align:center;">'
-                f'{a["from"].strftime("%d %b %Y")} → {a["to"].strftime("%d %b %Y")}</span>'
-                f'<span class="kmuted" style="font-size:12px;">{a["yrs"]*12:.1f}mo</span>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        st.markdown(
-            '<p class="kmuted" style="font-size:13px;margin-top:10px;">'
-            "Gold border = currently running antardaśā (sub-period).</p></div>",
-            unsafe_allow_html=True,
-        )
+    for d in birth_chart["dashas"]:
+        active = d["from"] <= now_utc < d["to"]
+        marker = "🔶 " if active else "▫️ "
+        label = f'{marker}{d["lord"]}   {d["from"].strftime("%Y-%m-%d")} to {d["to"].strftime("%Y-%m-%d")}   ({d["yrs"]:.1f}y)'
+        with st.expander(label, expanded=False):
+            antardashas = compute_antardashas(d["lordIdx"], d["from"], d["yrs"])
+            for a in antardashas:
+                active_a = a["from"] <= now_utc < a["to"]
+                style = (
+                    f"background:{C['panelSoft']};border:1px solid {C['gold']};"
+                    if active_a else "border:1px solid transparent;"
+                )
+                color = C["gold"] if active_a else C["ivory"]
+                st.markdown(
+                    f'<div style="{style}border-radius:6px;padding:6px 10px;margin-bottom:4px;'
+                    f'display:flex;justify-content:space-between;align-items:center;font-size:14px;">'
+                    f'<span style="color:{color};font-weight:600;min-width:90px;">{a["lord"]}</span>'
+                    f'<span class="kmuted" style="font-family:monospace;font-size:12px;flex:1;text-align:center;">'
+                    f'{a["from"].strftime("%d %b %Y")} → {a["to"].strftime("%d %b %Y")}</span>'
+                    f'<span class="kmuted" style="font-size:12px;">{a["yrs"]*12:.1f}mo</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+    st.markdown(
+        '<p class="kmuted" style="font-size:13px;margin-top:10px;">'
+        "🔶 = currently running mahādaśā. Click any row to see its antardaśā (sub-periods).</p></div>",
+        unsafe_allow_html=True,
+    )
 
 with c4:
     rows = [
@@ -730,23 +836,43 @@ with c4:
         unsafe_allow_html=True,
     )
 
-# ---- Row 3: Graha positions table (full width) -----------------------------
-st.markdown('<div class="kcard"><h4>Graha positions</h4>', unsafe_allow_html=True)
-df = pd.DataFrame([
-    {
-        "Graha": b["name"] + (" ℞" if b["retro"] and b["key"] not in ("Ra", "Ke") else ""),
-        "Birth sign": SIGNS[b["sign"]],
-        "Degree": fmt_deg(b["inSign"]),
-        "Nakṣatra": f"{NAKSHATRAS[b['nakIdx']]} · pada {b['pada']}",
-        "Transit now": (
-            f"{SIGNS[tdict[b['key']]['sign']]} {fmt_deg(tdict[b['key']]['inSign'])}"
-            + (" ℞" if tdict[b['key']]['retro'] and b['key'] not in ('Ra', 'Ke') else "")
-        ),
-    }
-    for b in birth_chart["bodies"]
-])
-st.dataframe(df, hide_index=True, use_container_width=True)
-st.markdown("</div>", unsafe_allow_html=True)
+# ---- Row 3: Graha Info table (full width, deva.guru style) ----------------
+st.markdown('<div class="kcard"><h4>Graha Info</h4>', unsafe_allow_html=True)
+
+header = (
+    "<tr><th>Body</th><th>Kāraka</th><th>Long</th><th>Lat</th><th>Dec</th>"
+    "<th>Nakṣatra</th><th>Pada</th><th>Transit now</th></tr>"
+)
+body_rows = []
+for b in birth_chart["bodies"]:
+    retro_mark = " ℞" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
+    combust_mark = " 🔥" if b.get("combust") else ""
+    long_str = f'{SIGN_ABBR[b["sign"]]} {fmt_dms(b["inSign"])}'
+    nak_lord = DASHA_LORD_SHORT[b["nakIdx"] % 9]
+    nak_str = f'{NAKSHATRAS[b["nakIdx"]]}<span class="kmuted">({b["nakIdx"]+1})</span> <span class="lord">{nak_lord}</span>'
+    t = tdict[b["key"]]
+    transit_str = (
+        f'{SIGNS[t["sign"]]} {fmt_deg(t["inSign"])}'
+        + (" ℞" if t["retro"] and b["key"] not in ("Ra", "Ke") else "")
+    )
+    body_rows.append(
+        f'<tr><td class="body-key">{b["key"]}{retro_mark}{combust_mark}</td>'
+        f'<td class="kmuted">{b["karaka"] or ""}</td>'
+        f'<td style="font-family:monospace;">{long_str}</td>'
+        f'<td class="kmuted" style="font-family:monospace;">{fmt_dms(b["lat"])}</td>'
+        f'<td class="kmuted" style="font-family:monospace;">{fmt_dms(b["dec"])}</td>'
+        f'<td>{nak_str}</td>'
+        f'<td>{b["pada"]}</td>'
+        f'<td class="ksindoor">{transit_str}</td></tr>'
+    )
+
+st.markdown(
+    f'<div style="overflow-x:auto;"><table class="gtable">{header}{"".join(body_rows)}</table></div>'
+    f'<p class="kmuted" style="font-size:13px;margin-top:10px;">'
+    "Kāraka = classical 8-graha Chara Kāraka (AK=Ātmakāraka … DK=Dārakāraka). "
+    "🔥 = combust (within classical orb of the Sun). ℞ = retrograde.</p></div>",
+    unsafe_allow_html=True,
+)
 
 st.markdown(
     '<p class="kmuted" style="font-size:12px;">Engine accuracy: Sun/Moon a few arc-minutes, '
