@@ -470,7 +470,8 @@ def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int) -> str:
         )
 
     parts = [
-        '<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" style="max-width:560px;width:100%;">',
+        '<svg viewBox="0 0 400 400" width="440" height="440" '
+        'xmlns="http://www.w3.org/2000/svg" style="display:block;">',
         '<defs><radialGradient id="cbg" cx="50%" cy="50%" r="70%">'
         '<stop offset="0%" stop-color="#FFFDF7" /><stop offset="100%" stop-color="#F3EAD3" />'
         '</radialGradient></defs>',
@@ -602,28 +603,31 @@ b_asc = next(b for b in birth_chart["bodies"] if b["key"] == "As")
 b_moon = next(b for b in birth_chart["bodies"] if b["key"] == "Mo")
 tp = transit_chart["panchanga"]
 
-# ---- Combined chart + panchanga row ---------------------------------------
+now_utc = datetime.utcnow()
+tdict = {t["key"]: t for t in transit_chart["bodies"]}
+
+# ---- Row 1: Combined chart + Nakṣatra panel (right beside the chart) ------
 c1, c2 = st.columns([2, 1])
 
 with c1:
     st.markdown(
         f'<div class="kcard"><h4>Janma Kuṇḍalī + Gochara '
-        f'<span class="kmuted" style="text-transform:none;letter-spacing:normal;font-size:12px;">'
+        f'<span class="kmuted" style="text-transform:none;letter-spacing:normal;font-size:13px;">'
         f'&nbsp;&nbsp;{form["city"][0]} · transits {transit_label}</span></h4>',
         unsafe_allow_html=True,
     )
     svg = build_svg_chart(birth_chart["bodies"], transit_chart["bodies"], b_asc["sign"])
     st.components.v1.html(
-        f'<div style="display:flex;justify-content:center;">{svg}</div>', height=430
+        f'<div style="display:flex;justify-content:center;">{svg}</div>', height=470
     )
     st.markdown(
         f"""
-        <div style="display:flex;gap:20px;justify-content:center;font-size:12px;flex-wrap:wrap;">
+        <div style="display:flex;gap:20px;justify-content:center;font-size:14px;flex-wrap:wrap;">
             <span><span style="color:{C['ivory']}">●</span> Birth · {form['dob'].strftime('%Y-%m-%d')} {form['tob'].strftime('%H:%M')}</span>
             <span class="ksindoor"><span style="color:{C['sindoor']}">●</span> Transit · now</span>
             <span class="kmuted">℞ retrograde</span>
         </div>
-        <p class="kmuted" style="text-align:center;font-size:12px;margin-top:8px;">
+        <p class="kmuted" style="text-align:center;font-size:14px;margin-top:8px;">
             {(form['name'] + ' · ') if form['name'] else ''}Lagna {SIGNS[b_asc['sign']]} {fmt_deg(b_asc['inSign'])}
             · Moon in {SIGNS[b_moon['sign']]} · houses fixed to birth lagna
         </p>
@@ -633,6 +637,79 @@ with c1:
     )
 
 with c2:
+    st.markdown('<div class="kcard"><h4>Nakṣatra · birth</h4>', unsafe_allow_html=True)
+    nak_rows = "".join(
+        f'<div class="krow"><span class="kmuted">{b["name"].split(" (")[0]}</span>'
+        f'<span style="text-align:right;">{NAKSHATRAS[b["nakIdx"]]}<br>'
+        f'<span class="kmuted" style="font-size:13px;">pada {b["pada"]}</span></span></div>'
+        for b in birth_chart["bodies"] if b["key"] != "As"
+    )
+    st.markdown(nak_rows, unsafe_allow_html=True)
+    st.markdown(
+        f'<p class="ksindoor" style="font-size:14px;margin-top:10px;">'
+        f'Moon Nakṣatra now: {NAKSHATRAS[tp["nakIdx"]]}</p></div>',
+        unsafe_allow_html=True,
+    )
+
+# ---- Row 2: Vimśottarī Mahādaśā (+ Antardaśā) beside Pañcāṅga -------------
+c3, c4 = st.columns([1, 1])
+
+with c3:
+    st.markdown('<div class="kcard"><h4>Vimśottarī Mahādaśā</h4>', unsafe_allow_html=True)
+    for d in birth_chart["dashas"]:
+        active = d["from"] <= now_utc < d["to"]
+        style = (
+            f"background:{C['panelSoft']};border:1px solid {C['gold']};"
+            if active else "border:1px solid transparent;"
+        )
+        color = C["gold"] if active else C["ivory"]
+        st.markdown(
+            f'<div style="{style}border-radius:6px;padding:7px 10px;margin-bottom:4px;'
+            f'display:flex;justify-content:space-between;align-items:center;font-size:15px;">'
+            f'<span style="color:{color};font-weight:600;min-width:110px;">{d["lord"]}</span>'
+            f'<span class="kmuted" style="font-family:monospace;font-size:13px;flex:1;text-align:center;">'
+            f'{d["from"].strftime("%d %b %Y")} → {d["to"].strftime("%d %b %Y")}</span>'
+            f'<span class="kmuted" style="font-size:13px;">{d["yrs"]:.1f}y</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    st.markdown(
+        '<p class="kmuted" style="font-size:13px;margin-top:10px;">'
+        "Gold border = currently running mahādaśā. First period is the balance at birth.</p></div>",
+        unsafe_allow_html=True,
+    )
+
+    active_maha = next((d for d in birth_chart["dashas"] if d["from"] <= now_utc < d["to"]), None)
+    if active_maha:
+        st.markdown(
+            f'<div class="kcard"><h4>Antardaśā within {active_maha["lord"]}</h4>',
+            unsafe_allow_html=True,
+        )
+        antardashas = compute_antardashas(active_maha["lordIdx"], active_maha["from"], active_maha["yrs"])
+        for a in antardashas:
+            active_a = a["from"] <= now_utc < a["to"]
+            style = (
+                f"background:{C['panelSoft']};border:1px solid {C['gold']};"
+                if active_a else "border:1px solid transparent;"
+            )
+            color = C["gold"] if active_a else C["ivory"]
+            st.markdown(
+                f'<div style="{style}border-radius:6px;padding:6px 10px;margin-bottom:4px;'
+                f'display:flex;justify-content:space-between;align-items:center;font-size:14px;">'
+                f'<span style="color:{color};font-weight:600;min-width:110px;">{a["lord"]}</span>'
+                f'<span class="kmuted" style="font-family:monospace;font-size:12px;flex:1;text-align:center;">'
+                f'{a["from"].strftime("%d %b %Y")} → {a["to"].strftime("%d %b %Y")}</span>'
+                f'<span class="kmuted" style="font-size:12px;">{a["yrs"]*12:.1f}mo</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            '<p class="kmuted" style="font-size:13px;margin-top:10px;">'
+            "Gold border = currently running antardaśā (sub-period).</p></div>",
+            unsafe_allow_html=True,
+        )
+
+with c4:
     rows = [
         ("Vāra", birth_chart["panchanga"]["vara"]),
         ("Tithi", f"{birth_chart['panchanga']['paksha']} {birth_chart['panchanga']['tithiName']} "
@@ -648,88 +725,28 @@ with c2:
     )
     st.markdown(
         f'<div class="kcard"><h4>Pañcāṅga · at birth</h4>{rows_html}'
-        f'<p class="ksindoor" style="font-size:12px;margin-top:10px;">'
+        f'<p class="ksindoor" style="font-size:14px;margin-top:10px;">'
         f'Now: {tp["paksha"]} {tp["tithiName"]} · {NAKSHATRAS[tp["nakIdx"]]}</p></div>',
         unsafe_allow_html=True,
     )
 
-# ---- Graha positions + Dasha table -----------------------------------------
-c3, c4 = st.columns(2)
-
-with c3:
-    st.markdown('<div class="kcard"><h4>Graha positions</h4>', unsafe_allow_html=True)
-    tdict = {t["key"]: t for t in transit_chart["bodies"]}
-    df = pd.DataFrame([
-        {
-            "Graha": b["name"] + (" ℞" if b["retro"] and b["key"] not in ("Ra", "Ke") else ""),
-            "Birth sign": SIGNS[b["sign"]],
-            "Degree": fmt_deg(b["inSign"]),
-            "Nakṣatra": f"{NAKSHATRAS[b['nakIdx']]} · pada {b['pada']}",
-            "Transit now": (
-                f"{SIGNS[tdict[b['key']]['sign']]} {fmt_deg(tdict[b['key']]['inSign'])}"
-                + (" ℞" if tdict[b['key']]['retro'] and b['key'] not in ('Ra', 'Ke') else "")
-            ),
-        }
-        for b in birth_chart["bodies"]
-    ])
-    st.dataframe(df, hide_index=True, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-with c4:
-    st.markdown('<div class="kcard"><h4>Vimśottarī Mahādaśā</h4>', unsafe_allow_html=True)
-    now_utc = datetime.utcnow()
-    for d in birth_chart["dashas"]:
-        active = d["from"] <= now_utc < d["to"]
-        style = (
-            f"background:{C['panelSoft']};border:1px solid {C['gold']};"
-            if active else "border:1px solid transparent;"
-        )
-        color = C["gold"] if active else C["ivory"]
-        st.markdown(
-            f'<div style="{style}border-radius:6px;padding:6px 10px;margin-bottom:4px;'
-            f'display:flex;justify-content:space-between;align-items:center;font-size:14px;">'
-            f'<span style="color:{color};font-weight:600;min-width:110px;">{d["lord"]}</span>'
-            f'<span class="kmuted" style="font-family:monospace;font-size:12px;flex:1;text-align:center;">'
-            f'{d["from"].strftime("%d %b %Y")} → {d["to"].strftime("%d %b %Y")}</span>'
-            f'<span class="kmuted" style="font-size:12px;">{d["yrs"]:.1f}y</span>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-    st.markdown(
-        '<p class="kmuted" style="font-size:14px;margin-top:10px;">'
-        "Gold border = currently running mahādaśā. First period is the balance at birth.</p></div>",
-        unsafe_allow_html=True,
-    )
-
-    active_maha = next((d for d in birth_chart["dashas"] if d["from"] <= now_utc < d["to"]), None)
-    if active_maha:
-        st.markdown(
-            f'<div class="kcard"><h4>Antardaśā within {active_maha["lord"]} Mahādaśā</h4>',
-            unsafe_allow_html=True,
-        )
-        antardashas = compute_antardashas(active_maha["lordIdx"], active_maha["from"], active_maha["yrs"])
-        for a in antardashas:
-            active_a = a["from"] <= now_utc < a["to"]
-            style = (
-                f"background:{C['panelSoft']};border:1px solid {C['gold']};"
-                if active_a else "border:1px solid transparent;"
-            )
-            color = C["gold"] if active_a else C["ivory"]
-            st.markdown(
-                f'<div style="{style}border-radius:6px;padding:6px 10px;margin-bottom:4px;'
-                f'display:flex;justify-content:space-between;align-items:center;font-size:15px;">'
-                f'<span style="color:{color};font-weight:600;min-width:110px;">{a["lord"]}</span>'
-                f'<span class="kmuted" style="font-family:monospace;font-size:13px;flex:1;text-align:center;">'
-                f'{a["from"].strftime("%d %b %Y")} → {a["to"].strftime("%d %b %Y")}</span>'
-                f'<span class="kmuted" style="font-size:13px;">{a["yrs"]*12:.1f}mo</span>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        st.markdown(
-            '<p class="kmuted" style="font-size:14px;margin-top:10px;">'
-            "Gold border = currently running antardaśā (sub-period).</p></div>",
-            unsafe_allow_html=True,
-        )
+# ---- Row 3: Graha positions table (full width) -----------------------------
+st.markdown('<div class="kcard"><h4>Graha positions</h4>', unsafe_allow_html=True)
+df = pd.DataFrame([
+    {
+        "Graha": b["name"] + (" ℞" if b["retro"] and b["key"] not in ("Ra", "Ke") else ""),
+        "Birth sign": SIGNS[b["sign"]],
+        "Degree": fmt_deg(b["inSign"]),
+        "Nakṣatra": f"{NAKSHATRAS[b['nakIdx']]} · pada {b['pada']}",
+        "Transit now": (
+            f"{SIGNS[tdict[b['key']]['sign']]} {fmt_deg(tdict[b['key']]['inSign'])}"
+            + (" ℞" if tdict[b['key']]['retro'] and b['key'] not in ('Ra', 'Ke') else "")
+        ),
+    }
+    for b in birth_chart["bodies"]
+])
+st.dataframe(df, hide_index=True, use_container_width=True)
+st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown(
     '<p class="kmuted" style="font-size:12px;">Engine accuracy: Sun/Moon a few arc-minutes, '
