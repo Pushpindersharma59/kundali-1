@@ -534,6 +534,23 @@ def compute_antardashas(maha_lord_idx: int, maha_start: datetime, maha_years: fl
         lord_idx = (maha_lord_idx + i) % 9
         yrs = maha_years * DASHA_YEARS[lord_idx] / 120
         end = cursor + timedelta(days=yrs * YEAR_DAYS)
+        subs.append({"lord": DASHA_LORDS[lord_idx], "lordIdx": lord_idx, "from": cursor, "to": end, "yrs": yrs})
+        cursor = end
+    return subs
+
+
+def compute_pratyantardashas(antar_lord_idx: int, antar_start: datetime, antar_years: float):
+    """Vimśottarī pratyantardaśā (sub-sub-periods) within one antardaśā.
+    Same nested-cycle rule as the mahādaśā -> antardaśā step, one level deeper:
+    sequence starts at the antardaśā's own lord and cycles through all 9 lords,
+    each slice proportional to its lord's full dasha-years out of 120."""
+    YEAR_DAYS = 365.25
+    subs = []
+    cursor = antar_start
+    for i in range(9):
+        lord_idx = (antar_lord_idx + i) % 9
+        yrs = antar_years * DASHA_YEARS[lord_idx] / 120
+        end = cursor + timedelta(days=yrs * YEAR_DAYS)
         subs.append({"lord": DASHA_LORDS[lord_idx], "from": cursor, "to": end, "yrs": yrs})
         cursor = end
     return subs
@@ -775,7 +792,7 @@ with c2:
         unsafe_allow_html=True,
     )
 
-# ---- Row 2: Vimśottarī Mahādaśā (+ Antardaśā) beside Pañcāṅga -------------
+# ---- Row 2: Vimśottarī Mahādaśā (+ Antardaśā + Pratyantardaśā) beside Pañcāṅga -------------
 c3, c4 = st.columns([1, 1])
 
 with c3:
@@ -787,12 +804,12 @@ with c3:
         unsafe_allow_html=True,
     )
     for d in birth_chart["dashas"]:
-        active = d["from"] <= now_utc < d["to"]
-        marker = "🔶 " if active else "▫️ "
+        active_maha = d["from"] <= now_utc < d["to"]
+        marker = "🔶 " if active_maha else "▫️ "
         label = f'{marker}{d["lord"]}   {d["from"].strftime("%Y-%m-%d")} to {d["to"].strftime("%Y-%m-%d")}   ({d["yrs"]:.1f}y)'
         with st.expander(label, expanded=False):
             antardashas = compute_antardashas(d["lordIdx"], d["from"], d["yrs"])
-            for a in antardashas:
+            for i, a in enumerate(antardashas):
                 active_a = a["from"] <= now_utc < a["to"]
                 style = (
                     f"background:{C['panelSoft']};border:1px solid {C['gold']};"
@@ -809,9 +826,34 @@ with c3:
                     f'</div>',
                     unsafe_allow_html=True,
                 )
+                # ---- Pratyantardaśā: 3rd-level sub-sub-periods within this antardaśā.
+                # Streamlit doesn't support nested st.expander widgets, so this level
+                # renders as an always-visible, further-indented mini-list right under
+                # its parent antardaśā row.
+                pratyantardashas = compute_pratyantardashas(a["lordIdx"], a["from"], a["yrs"])
+                praty_rows = []
+                for p in pratyantardashas:
+                    active_p = p["from"] <= now_utc < p["to"]
+                    p_style = (
+                        f"background:{C['bg']};border-left:3px solid {C['sindoor']};"
+                        if active_p else "border-left:3px solid transparent;"
+                    )
+                    p_color = C["sindoor"] if active_p else C["muted"]
+                    praty_rows.append(
+                        f'<div style="{p_style}border-radius:4px;padding:3px 8px 3px 14px;'
+                        f'margin-left:18px;margin-bottom:2px;display:flex;justify-content:space-between;'
+                        f'align-items:center;font-size:12px;">'
+                        f'<span style="color:{p_color};font-weight:600;min-width:80px;">{p["lord"]}</span>'
+                        f'<span class="kmuted" style="font-family:monospace;font-size:11px;flex:1;text-align:center;">'
+                        f'{p["from"].strftime("%d %b %Y")} → {p["to"].strftime("%d %b %Y")}</span>'
+                        f'<span class="kmuted" style="font-size:11px;">{p["yrs"]*365.25:.0f}d</span>'
+                        f'</div>'
+                    )
+                st.markdown("".join(praty_rows), unsafe_allow_html=True)
     st.markdown(
         '<p class="kmuted" style="font-size:13px;margin-top:10px;">'
-        "🔶 = currently running mahādaśā. Click any row to see its antardaśā (sub-periods).</p></div>",
+        "🔶 = currently running mahādaśā. Click any row to see its antardaśā (sub-periods), "
+        "with pratyantardaśā (sub-sub-periods) listed underneath each.</p></div>",
         unsafe_allow_html=True,
     )
 
