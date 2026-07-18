@@ -192,6 +192,10 @@ DASHA_LORD_SHORT = ["Ke", "Ve", "Su", "Mo", "Ma", "Ra", "Jp", "Sa", "Me"]
 
 SIGN_ABBR = ["Ar", "Ta", "Ge", "Cn", "Le", "Vi", "Li", "Sc", "Sg", "Cp", "Aq", "Pi"]
 
+NAK_ABBR = ["Aśw", "Bha", "Krt", "Roh", "Mrg", "Ard", "Pun", "Pus", "Āśl", "Mag", "PPh",
+            "UPh", "Has", "Cit", "Swa", "Vis", "Anu", "Jye", "Mūl", "PAs", "UAs", "Śra",
+            "Dha", "Śat", "PBh", "UBh", "Rev"]
+
 # combustion orb in degrees (approx. classical values) — used only for the 🔥 marker
 COMBUSTION_ORB = {"Ma": 17, "Me": 14, "Jp": 11, "Ve": 10, "Sa": 15}
 
@@ -331,12 +335,10 @@ CITIES = [
     ("Vijayawada", "Andhra Pradesh, India", 16.5062, 80.6480, 5.5),
     ("Visakhapatnam", "Andhra Pradesh, India", 17.6868, 83.2185, 5.5),
     ("Vizianagaram", "Andhra Pradesh, India", 18.1067, 83.3956, 5.5),
-
     ("Itanagar", "Arunachal Pradesh, India", 27.0844, 93.6053, 5.5),
     ("Naharlagun", "Arunachal Pradesh, India", 27.1047, 93.6952, 5.5),
     ("Pasighat", "Arunachal Pradesh, India", 28.0667, 95.3333, 5.5),
     ("Tawang", "Arunachal Pradesh, India", 27.5860, 91.8656, 5.5),
-
     ("Dibrugarh", "Assam, India", 27.4728, 94.9120, 5.5),
     ("Dhubri", "Assam, India", 26.0186, 89.9856, 5.5),
     ("Goalpara", "Assam, India", 26.1680, 90.6250, 5.5),
@@ -348,7 +350,6 @@ CITIES = [
     ("Silchar", "Assam, India", 24.8333, 92.7789, 5.5),
     ("Tezpur", "Assam, India", 26.6528, 92.7926, 5.5),
     ("Tinsukia", "Assam, India", 27.4891, 95.3599, 5.5),
-
     ("Ara", "Bihar, India", 25.5560, 84.6633, 5.5),
     ("Arrah", "Bihar, India", 25.5560, 84.6633, 5.5),
     ("Aurangabad", "Bihar, India", 24.7520, 84.3742, 5.5),
@@ -375,7 +376,6 @@ CITIES = [
     ("Samastipur", "Bihar, India", 25.8620, 85.7795, 5.5),
     ("Sasaram", "Bihar, India", 24.9490, 84.0164, 5.5),
     ("Siwan", "Bihar, India", 26.2196, 84.3561, 5.5),
-
     ("Bilaspur", "Chhattisgarh, India", 22.0797, 82.1409, 5.5),
     ("Bhilai", "Chhattisgarh, India", 21.1938, 81.3509, 5.5),
     ("Dhamtari", "Chhattisgarh, India", 20.7074, 81.5497, 5.5),
@@ -385,12 +385,10 @@ CITIES = [
     ("Raigarh", "Chhattisgarh, India", 21.8974, 83.3956, 5.5),
     ("Raipur", "Chhattisgarh, India", 21.2514, 81.6296, 5.5),
     ("Rajnandgaon", "Chhattisgarh, India", 21.0974, 81.0337, 5.5),
-
     ("Margao", "Goa, India", 15.2993, 73.9580, 5.5),
     ("Mapusa", "Goa, India", 15.5937, 73.8132, 5.5),
     ("Panaji", "Goa, India", 15.4909, 73.8278, 5.5),
     ("Ponda", "Goa, India", 15.4030, 74.0155, 5.5),
-
     ("Ahmedabad", "Gujarat, India", 23.0225, 72.5714, 5.5),
     ("Amreli", "Gujarat, India", 21.6032, 71.2221, 5.5),
     ("Anand", "Gujarat, India", 22.5645, 72.9289, 5.5),
@@ -406,7 +404,7 @@ CITIES = [
     ("Morbi", "Gujarat, India", 22.8173, 70.8377, 5.5),
     ("Nadiad", "Gujarat, India", 22.6916, 72.8634, 5.5),
     ("Navsari", "Gujarat, India", 20.9467, 72.9520, 5.5),
-        ("Palanpur", "Gujarat, India", 24.1722, 72.4383, 5.5),
+    ("Palanpur", "Gujarat, India", 24.1722, 72.4383, 5.5),
     ("Patan", "Gujarat, India", 23.8500, 72.1167, 5.5),
     ("Porbandar", "Gujarat, India", 21.6417, 69.6293, 5.5),
     ("Rajkot", "Gujarat, India", 22.3039, 70.8022, 5.5),
@@ -416,7 +414,6 @@ CITIES = [
     ("Valsad", "Gujarat, India", 20.5992, 72.9342, 5.5),
     ("Veraval", "Gujarat, India", 20.9077, 70.3679, 5.5),
     ("Vapi", "Gujarat, India", 20.3893, 72.9106, 5.5),
-
     ("Ambala", "Haryana, India", 30.3782, 76.7767, 5.5),
     ("Bahadurgarh", "Haryana, India", 28.6929, 76.9356, 5.5),
     ("Bhiwani", "Haryana, India", 28.7930, 76.1397, 5.5),
@@ -442,7 +439,6 @@ CITIES = [
     ("Sirsa", "Haryana, India", 29.5349, 75.0289, 5.5),
     ("Sonipat", "Haryana, India", 28.9931, 77.0151, 5.5),
     ("Yamunanagar", "Haryana, India", 30.1290, 77.2674, 5.5),
-
     ("Baddi", "Himachal Pradesh, India", 30.9578, 76.7914, 5.5),
     ("Bilaspur", "Himachal Pradesh, India", 31.3315, 76.7566, 5.5),
     ("Chamba", "Himachal Pradesh, India", 32.5530, 76.1258, 5.5),
@@ -456,7 +452,6 @@ CITIES = [
     ("Shimla", "Himachal Pradesh, India", 31.1048, 77.1734, 5.5),
     ("Solan", "Himachal Pradesh, India", 30.9045, 77.0967, 5.5),
     ("Una", "Himachal Pradesh, India", 31.4646, 76.2691, 5.5),
-
     ("Anantnag", "Jammu and Kashmir, India", 33.7311, 75.1480, 5.5),
     ("Baramulla", "Jammu and Kashmir, India", 34.1980, 74.3636, 5.5),
     ("Budgam", "Jammu and Kashmir, India", 34.0150, 74.7220, 5.5),
@@ -469,7 +464,6 @@ CITIES = [
     ("Shopian", "Jammu and Kashmir, India", 33.7152, 74.8336, 5.5),
     ("Srinagar", "Jammu and Kashmir, India", 34.0837, 74.7973, 5.5),
     ("Udhampur", "Jammu and Kashmir, India", 32.9243, 75.1357, 5.5),
-
     ("Bokaro", "Jharkhand, India", 23.6693, 86.1511, 5.5),
     ("Chaibasa", "Jharkhand, India", 22.5500, 85.8000, 5.5),
     ("Deoghar", "Jharkhand, India", 24.4829, 86.6947, 5.5),
@@ -484,7 +478,6 @@ CITIES = [
     ("Ramgarh", "Jharkhand, India", 23.6303, 85.5216, 5.5),
     ("Ranchi", "Jharkhand, India", 23.3441, 85.3096, 5.5),
     ("Sahibganj", "Jharkhand, India", 25.2500, 87.6500, 5.5),
-
     ("Bagalkot", "Karnataka, India", 16.1867, 75.6961, 5.5),
     ("Ballari", "Karnataka, India", 15.1394, 76.9214, 5.5),
     ("Belagavi", "Karnataka, India", 15.8497, 74.4977, 5.5),
@@ -502,14 +495,13 @@ CITIES = [
     ("Mandya", "Karnataka, India", 12.5223, 76.8975, 5.5),
     ("Mangaluru", "Karnataka, India", 12.9141, 74.8560, 5.5),
     ("Mysuru", "Karnataka, India", 12.2958, 76.6394, 5.5),
-        ("Raichur", "Karnataka, India", 16.2076, 77.3463, 5.5),
+    ("Raichur", "Karnataka, India", 16.2076, 77.3463, 5.5),
     ("Ramanagara", "Karnataka, India", 12.7219, 77.2815, 5.5),
     ("Shivamogga", "Karnataka, India", 13.9299, 75.5681, 5.5),
     ("Tumakuru", "Karnataka, India", 13.3409, 77.1010, 5.5),
     ("Udupi", "Karnataka, India", 13.3409, 74.7421, 5.5),
     ("Vijayapura", "Karnataka, India", 16.8302, 75.7100, 5.5),
     ("Yadgir", "Karnataka, India", 16.7700, 77.1400, 5.5),
-
     ("Alappuzha", "Kerala, India", 9.4981, 76.3388, 5.5),
     ("Angamaly", "Kerala, India", 10.1900, 76.3900, 5.5),
     ("Chalakudy", "Kerala, India", 10.3000, 76.3400, 5.5),
@@ -531,7 +523,6 @@ CITIES = [
     ("Thiruvananthapuram", "Kerala, India", 8.5241, 76.9366, 5.5),
     ("Tirur", "Kerala, India", 10.9137, 75.9220, 5.5),
     ("Vadakara", "Kerala, India", 11.6085, 75.5917, 5.5),
-
     ("Balaghat", "Madhya Pradesh, India", 21.8129, 80.1838, 5.5),
     ("Betul", "Madhya Pradesh, India", 21.9000, 77.9000, 5.5),
     ("Bhind", "Madhya Pradesh, India", 26.5667, 78.7833, 5.5),
@@ -567,7 +558,6 @@ CITIES = [
     ("Tikamgarh", "Madhya Pradesh, India", 24.7400, 78.8300, 5.5),
     ("Ujjain", "Madhya Pradesh, India", 23.1765, 75.7885, 5.5),
     ("Vidisha", "Madhya Pradesh, India", 23.5251, 77.8081, 5.5),
-
     ("Ahmednagar", "Maharashtra, India", 19.0948, 74.7480, 5.5),
     ("Akola", "Maharashtra, India", 20.7002, 77.0082, 5.5),
     ("Amravati", "Maharashtra, India", 20.9374, 77.7796, 5.5),
@@ -602,7 +592,7 @@ CITIES = [
     ("Thane", "Maharashtra, India", 19.2183, 72.9781, 5.5),
     ("Wardha", "Maharashtra, India", 20.7453, 78.6022, 5.5),
     ("Yavatmal", "Maharashtra, India", 20.3899, 78.1307, 5.5),
-        ("Imphal", "Manipur, India", 24.8170, 93.9368, 5.5),
+    ("Imphal", "Manipur, India", 24.8170, 93.9368, 5.5),
     ("Bishnupur", "Manipur, India", 24.6333, 93.7667, 5.5),
     ("Churachandpur", "Manipur, India", 24.3333, 93.6833, 5.5),
     ("Kakching", "Manipur, India", 24.5000, 93.9833, 5.5),
@@ -610,28 +600,24 @@ CITIES = [
     ("Senapati", "Manipur, India", 25.2667, 94.0167, 5.5),
     ("Thoubal", "Manipur, India", 24.6388, 93.9964, 5.5),
     ("Ukhrul", "Manipur, India", 25.1087, 94.3617, 5.5),
-
     ("Shillong", "Meghalaya, India", 25.5788, 91.8933, 5.5),
     ("Tura", "Meghalaya, India", 25.5142, 90.2024, 5.5),
     ("Jowai", "Meghalaya, India", 25.4539, 92.1976, 5.5),
     ("Nongpoh", "Meghalaya, India", 25.9020, 91.8769, 5.5),
     ("Baghmara", "Meghalaya, India", 25.2088, 90.6443, 5.5),
     ("Williamnagar", "Meghalaya, India", 25.4924, 90.6130, 5.5),
-
     ("Aizawl", "Mizoram, India", 23.7271, 92.7176, 5.5),
     ("Lunglei", "Mizoram, India", 22.8671, 92.7655, 5.5),
     ("Champhai", "Mizoram, India", 23.4560, 93.3282, 5.5),
     ("Kolasib", "Mizoram, India", 24.2239, 92.6787, 5.5),
     ("Serchhip", "Mizoram, India", 23.2988, 92.8460, 5.5),
     ("Saiha", "Mizoram, India", 22.4918, 92.9814, 5.5),
-
     ("Dimapur", "Nagaland, India", 25.9091, 93.7276, 5.5),
     ("Kohima", "Nagaland, India", 25.6751, 94.1086, 5.5),
     ("Mokokchung", "Nagaland, India", 26.3248, 94.5183, 5.5),
     ("Tuensang", "Nagaland, India", 26.2670, 94.8241, 5.5),
     ("Wokha", "Nagaland, India", 26.0972, 94.2583, 5.5),
     ("Zunheboto", "Nagaland, India", 25.9700, 94.5200, 5.5),
-
     ("Angul", "Odisha, India", 20.8444, 85.1511, 5.5),
     ("Balangir", "Odisha, India", 20.7042, 83.4903, 5.5),
     ("Balasore", "Odisha, India", 21.4942, 86.9335, 5.5),
@@ -654,7 +640,6 @@ CITIES = [
     ("Rourkela", "Odisha, India", 22.2604, 84.8536, 5.5),
     ("Sambalpur", "Odisha, India", 21.4669, 83.9812, 5.5),
     ("Sundargarh", "Odisha, India", 22.1167, 84.0333, 5.5),
-
     ("Amritsar", "Punjab, India", 31.6340, 74.8723, 5.5),
     ("Anandpur Sahib", "Punjab, India", 31.2390, 76.5020, 5.5),
     ("Barnala", "Punjab, India", 30.3819, 75.5468, 5.5),
@@ -683,7 +668,6 @@ CITIES = [
     ("Rupnagar", "Punjab, India", 30.9661, 76.5231, 5.5),
     ("Sangrur", "Punjab, India", 30.2451, 75.8421, 5.5),
     ("Tarn Taran", "Punjab, India", 31.4519, 74.9253, 5.5),
-
     ("Ajmer", "Rajasthan, India", 26.4499, 74.6399, 5.5),
     ("Alwar", "Rajasthan, India", 27.5530, 76.6346, 5.5),
     ("Banswara", "Rajasthan, India", 23.5461, 74.4349, 5.5),
@@ -700,7 +684,7 @@ CITIES = [
     ("Dholpur", "Rajasthan, India", 26.7025, 77.8934, 5.5),
     ("Hanumangarh", "Rajasthan, India", 29.5800, 74.3200, 5.5),
     ("Jaipur", "Rajasthan, India", 26.9124, 75.7873, 5.5),
-        ("Jaisalmer", "Rajasthan, India", 26.9157, 70.9083, 5.5),
+    ("Jaisalmer", "Rajasthan, India", 26.9157, 70.9083, 5.5),
     ("Jalore", "Rajasthan, India", 25.3450, 72.6150, 5.5),
     ("Jhalawar", "Rajasthan, India", 24.5973, 76.1611, 5.5),
     ("Jhunjhunu", "Rajasthan, India", 28.1289, 75.3990, 5.5),
@@ -718,14 +702,12 @@ CITIES = [
     ("Sri Ganganagar", "Rajasthan, India", 29.9038, 73.8772, 5.5),
     ("Tonk", "Rajasthan, India", 26.1664, 75.7885, 5.5),
     ("Udaipur", "Rajasthan, India", 24.5854, 73.7125, 5.5),
-
     ("Gangtok", "Sikkim, India", 27.3389, 88.6065, 5.5),
     ("Geyzing", "Sikkim, India", 27.2896, 88.2576, 5.5),
     ("Mangan", "Sikkim, India", 27.5167, 88.5333, 5.5),
     ("Namchi", "Sikkim, India", 27.1652, 88.3639, 5.5),
     ("Rangpo", "Sikkim, India", 27.1773, 88.5336, 5.5),
     ("Singtam", "Sikkim, India", 27.2347, 88.5017, 5.5),
-
     ("Ambur", "Tamil Nadu, India", 12.7904, 78.7166, 5.5),
     ("Arakkonam", "Tamil Nadu, India", 13.0845, 79.6704, 5.5),
     ("Ariyalur", "Tamil Nadu, India", 11.1385, 79.0756, 5.5),
@@ -763,7 +745,6 @@ CITIES = [
     ("Vellore", "Tamil Nadu, India", 12.9165, 79.1325, 5.5),
     ("Viluppuram", "Tamil Nadu, India", 11.9390, 79.4861, 5.5),
     ("Virudhunagar", "Tamil Nadu, India", 9.5851, 77.9570, 5.5),
-
     ("Adilabad", "Telangana, India", 19.6641, 78.5320, 5.5),
     ("Bhadradri Kothagudem", "Telangana, India", 17.5511, 80.6176, 5.5),
     ("Hanamkonda", "Telangana, India", 18.0050, 79.5700, 5.5),
@@ -782,14 +763,13 @@ CITIES = [
     ("Suryapet", "Telangana, India", 17.1405, 79.6200, 5.5),
     ("Warangal", "Telangana, India", 17.9784, 79.5941, 5.5),
     ("Zaheerabad", "Telangana, India", 17.6814, 77.6074, 5.5),
-
     ("Agartala", "Tripura, India", 23.8315, 91.2868, 5.5),
     ("Belonia", "Tripura, India", 23.2518, 91.4546, 5.5),
     ("Dharmanagar", "Tripura, India", 24.3667, 92.1667, 5.5),
     ("Kailasahar", "Tripura, India", 24.3333, 92.0000, 5.5),
     ("Khowai", "Tripura, India", 24.0670, 91.6030, 5.5),
     ("Udaipur", "Tripura, India", 23.5333, 91.4833, 5.5),
-        ("Agra", "Uttar Pradesh, India", 27.1767, 78.0081, 5.5),
+    ("Agra", "Uttar Pradesh, India", 27.1767, 78.0081, 5.5),
     ("Aligarh", "Uttar Pradesh, India", 27.8974, 78.0880, 5.5),
     ("Ambedkar Nagar", "Uttar Pradesh, India", 26.4050, 82.5670, 5.5),
     ("Amethi", "Uttar Pradesh, India", 26.1542, 81.8147, 5.5),
@@ -863,7 +843,6 @@ CITIES = [
     ("Sultanpur", "Uttar Pradesh, India", 26.2648, 82.0727, 5.5),
     ("Unnao", "Uttar Pradesh, India", 26.5471, 80.4878, 5.5),
     ("Varanasi", "Uttar Pradesh, India", 25.3176, 82.9739, 5.5),
-
     ("Almora", "Uttarakhand, India", 29.5971, 79.6591, 5.5),
     ("Bageshwar", "Uttarakhand, India", 29.8370, 79.7710, 5.5),
     ("Chamoli", "Uttarakhand, India", 30.4030, 79.3230, 5.5),
@@ -881,7 +860,7 @@ CITIES = [
     ("Tehri", "Uttarakhand, India", 30.3785, 78.4800, 5.5),
     ("Udham Singh Nagar", "Uttarakhand, India", 28.9750, 79.3950, 5.5),
     ("Uttarkashi", "Uttarakhand, India", 30.7290, 78.4430, 5.5),
-        ("Alipurduar", "West Bengal, India", 26.4837, 89.5229, 5.5),
+    ("Alipurduar", "West Bengal, India", 26.4837, 89.5229, 5.5),
     ("Asansol", "West Bengal, India", 23.6739, 86.9524, 5.5),
     ("Bally", "West Bengal, India", 22.6500, 88.3400, 5.5),
     ("Balurghat", "West Bengal, India", 25.2167, 88.7833, 5.5),
@@ -926,7 +905,6 @@ CITIES = [
     ("Serampore", "West Bengal, India", 22.7528, 88.3400, 5.5),
     ("Siliguri", "West Bengal, India", 26.7271, 88.3953, 5.5),
     ("Tamluk", "West Bengal, India", 22.3000, 87.9200, 5.5),
-
     ("Kavaratti", "Lakshadweep, India", 10.5667, 72.6417, 5.5),
     ("Silvassa", "Dadra and Nagar Haveli and Daman and Diu, India", 20.2763, 73.0083, 5.5),
     ("Daman", "Dadra and Nagar Haveli and Daman and Diu, India", 20.3974, 72.8328, 5.5),
@@ -937,8 +915,6 @@ CITIES = [
     ("Karaikal", "Puducherry, India", 10.9254, 79.8380, 5.5),
     ("Mahe", "Puducherry, India", 11.7000, 75.5333, 5.5),
     ("Yanam", "Puducherry, India", 16.7333, 82.2167, 5.5),
-
-    # Additional major cities
     ("Greater Noida", "Uttar Pradesh, India", 28.4744, 77.5040, 5.5),
     ("Jewar", "Uttar Pradesh, India", 28.1235, 77.5553, 5.5),
     ("Modinagar", "Uttar Pradesh, India", 28.8310, 77.5770, 5.5),
@@ -947,7 +923,6 @@ CITIES = [
     ("Khurja", "Uttar Pradesh, India", 28.2530, 77.8550, 5.5),
     ("Vrindavan", "Uttar Pradesh, India", 27.5800, 77.7000, 5.5),
     ("Chitrakoot", "Uttar Pradesh, India", 25.2000, 80.9000, 5.5),
-    ("Bhadohi", "Uttar Pradesh, India", 25.3956, 82.5703, 5.5),
     ("Mughalsarai", "Uttar Pradesh, India", 25.2800, 83.1200, 5.5),
     ("Renukoot", "Uttar Pradesh, India", 24.2000, 83.0400, 5.5),
     ("Obra", "Uttar Pradesh, India", 24.4200, 82.9800, 5.5),
@@ -966,7 +941,6 @@ CITIES = [
     ("Sardhana", "Uttar Pradesh, India", 29.1500, 77.6200, 5.5),
     ("Kairana", "Uttar Pradesh, India", 29.4000, 77.2000, 5.5),
     ("Deoband", "Uttar Pradesh, India", 29.6900, 77.6800, 5.5),
-    ("Bhadohi Nagar", "Uttar Pradesh, India", 25.3900, 82.5700, 5.5),
     ("Robertsganj", "Uttar Pradesh, India", 24.6900, 83.0700, 5.5),
     ("Gauriganj", "Uttar Pradesh, India", 26.2000, 81.7000, 5.5),
     ("Loni", "Uttar Pradesh, India", 28.7500, 77.2900, 5.5),
@@ -977,14 +951,13 @@ CITIES = [
     ("Padrauna", "Uttar Pradesh, India", 26.9000, 83.9800, 5.5),
     ("Colonelganj", "Uttar Pradesh, India", 27.1300, 81.6900, 5.5),
     ("Nautanwa", "Uttar Pradesh, India", 27.4300, 83.4200, 5.5),
-    ("Mahoba Road", "Uttar Pradesh, India", 25.3000, 79.8700, 5.5),
     ("Laharpur", "Uttar Pradesh, India", 27.7100, 80.9000, 5.5),
     ("Bisalpur", "Uttar Pradesh, India", 28.3000, 79.8000, 5.5),
     ("Faridpur", "Uttar Pradesh, India", 28.2100, 79.5400, 5.5),
     ("Aonla", "Uttar Pradesh, India", 28.2700, 79.1500, 5.5),
     ("Bilsi", "Uttar Pradesh, India", 28.1300, 78.9200, 5.5),
     ("Dataganj", "Uttar Pradesh, India", 28.0200, 79.4000, 5.5),
-        ("Anupshahr", "Uttar Pradesh, India", 28.3600, 78.2700, 5.5),
+    ("Anupshahr", "Uttar Pradesh, India", 28.3600, 78.2700, 5.5),
     ("Dibai", "Uttar Pradesh, India", 28.2100, 78.2600, 5.5),
     ("Siana", "Uttar Pradesh, India", 28.6300, 78.0600, 5.5),
     ("Pahasu", "Uttar Pradesh, India", 28.1800, 78.0700, 5.5),
@@ -1084,7 +1057,6 @@ CITIES = [
     ("Niwai", "Rajasthan, India", 26.3600, 75.9200, 5.5),
     ("Keshoraipatan", "Rajasthan, India", 25.3000, 75.9300, 5.5),
     ("Lakheri", "Rajasthan, India", 25.6700, 76.1700, 5.5),
-    
 ]
 
 
@@ -1352,11 +1324,11 @@ def now_in_city(tz: float) -> datetime:
 
 
 # ============================================================
-# COLORS  (same palette as the original)
+# COLORS  (butterscotch-tinted background)
 # ============================================================
 
 C = {
-    "bg": "#FAF7F0", "panel": "#FFFFFF", "panelSoft": "#FDF3E0", "line": "#E2D9C4",
+    "bg": "#F6DFAE", "panel": "#FFFFFF", "panelSoft": "#FBEFD6", "line": "#E7D3A4",
     "gold": "#B8842E", "ivory": "#3A2E1F", "muted": "#7A6F5C", "sindoor": "#C4462B",
     "moon": "#3A5B8C",
 }
@@ -1416,6 +1388,122 @@ def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int) -> str:
             parts.append(label(x, "b", cx, start_y + i * step))
         for i, x in enumerate(t):
             parts.append(label(x, "t", cx, start_y + (len(b) + i) * step))
+
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _wheel_point(cx, cy, r, clockwise_deg):
+    """Point on a circle at radius r, angle measured clockwise from straight up (12 o'clock)."""
+    rad = clockwise_deg * D2R
+    return cx + r * math.sin(rad), cy - r * math.cos(rad)
+
+
+def build_circular_svg_chart(birth_bodies, transit_bodies, asc_sign: int, asc_deg_in_sign: float) -> str:
+    """Circular (rāśi-wheel) chart: signs fixed to the zodiac (Aries at top, running
+    counter-clockwise), an outer nakṣatra ring, dashed house spokes, and an Oṃ at the
+    centre — in the style of the reference screenshot."""
+    cx, cy = 300, 300
+    R_outer = 280
+    R_nak_out, R_nak_in = 272, 240
+    R_sign_out, R_sign_in = 240, 205
+    R_house_num = 185
+    R_body_ring_out, R_body_ring_in = 205, 60
+
+    def sign_center_angle(sign_idx):
+        return -(sign_idx * 30) % 360
+
+    def nak_center_angle(nak_idx):
+        return -(nak_idx * (360 / 27)) % 360
+
+    parts = [
+        f'<svg viewBox="0 0 {2*cx} {2*cy}" width="480" height="480" '
+        'xmlns="http://www.w3.org/2000/svg" style="display:block;">',
+        '<defs><radialGradient id="cwheel" cx="50%" cy="50%" r="70%">'
+        '<stop offset="0%" stop-color="#FFFDF7" /><stop offset="100%" stop-color="#F6EBCF" />'
+        '</radialGradient></defs>',
+        f'<circle cx="{cx}" cy="{cy}" r="{R_outer}" fill="url(#cwheel)" stroke="{C["gold"]}" stroke-width="2"/>',
+        f'<circle cx="{cx}" cy="{cy}" r="{R_nak_in}" fill="none" stroke="{C["line"]}" stroke-width="1"/>',
+        f'<circle cx="{cx}" cy="{cy}" r="{R_sign_in}" fill="none" stroke="{C["gold"]}" stroke-width="1.2"/>',
+    ]
+
+    # nakshatra ring: 27 boundary ticks + abbreviation labels
+    for n in range(27):
+        boundary = (-(n * (360 / 27)) + (360 / 54)) % 360
+        x1, y1 = _wheel_point(cx, cy, R_nak_in, boundary)
+        x2, y2 = _wheel_point(cx, cy, R_nak_out, boundary)
+        parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+                      f'stroke="{C["line"]}" stroke-width="1"/>')
+        lx, ly = _wheel_point(cx, cy, (R_nak_out + R_nak_in) / 2, nak_center_angle(n))
+        parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="middle" dominant-baseline="middle" '
+                      f'font-size="9" fill="{C["muted"]}" font-family="monospace">{n+1} {NAK_ABBR[n]}</text>')
+
+    # sign ring: 12 boundary lines + sign abbreviation
+    for s in range(12):
+        boundary = (-(s * 30) + 15) % 360
+        x1, y1 = _wheel_point(cx, cy, R_sign_in - 10, boundary)
+        x2, y2 = _wheel_point(cx, cy, R_sign_out, boundary)
+        parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+                      f'stroke="{C["gold"]}" stroke-width="1"/>')
+        lx, ly = _wheel_point(cx, cy, (R_sign_out + R_sign_in) / 2, sign_center_angle(s))
+        parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="middle" dominant-baseline="middle" '
+                      f'font-size="14" font-weight="700" fill="{C["gold"]}" '
+                      f'font-family="Georgia, serif">{SIGN_ABBR[s]}</text>')
+
+    # dashed spokes from centre to each sign boundary, and house numbers
+    for s in range(12):
+        boundary = (-(s * 30) + 15) % 360
+        x1, y1 = _wheel_point(cx, cy, 30, boundary)
+        x2, y2 = _wheel_point(cx, cy, R_sign_in - 10, boundary)
+        parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+                      f'stroke="{C["muted"]}" stroke-width="1" stroke-dasharray="3,3" opacity="0.6"/>')
+        house_num = ((s - asc_sign) % 12) + 1
+        hx, hy = _wheel_point(cx, cy, R_house_num, sign_center_angle(s))
+        parts.append(f'<text x="{hx:.1f}" y="{hy:.1f}" text-anchor="middle" dominant-baseline="middle" '
+                      f'font-size="11" fill="{C["muted"]}" font-family="monospace">{house_num}</text>')
+
+    # ascendant marker (purple tick + "As" at its exact degree)
+    asc_angle = sign_center_angle(asc_sign) - (asc_deg_in_sign - 15) * (30 / 30)
+    asc_angle = (-(asc_sign * 30 + asc_deg_in_sign) + 15) % 360
+    ax1, ay1 = _wheel_point(cx, cy, R_sign_in - 25, asc_angle)
+    ax2, ay2 = _wheel_point(cx, cy, R_sign_out, asc_angle)
+    parts.append(f'<line x1="{ax1:.1f}" y1="{ay1:.1f}" x2="{ax2:.1f}" y2="{ay2:.1f}" '
+                 f'stroke="{C["moon"]}" stroke-width="2.5"/>')
+    tx, ty = _wheel_point(cx, cy, R_body_ring_out + 14, asc_angle)
+    parts.append(f'<text x="{tx:.1f}" y="{ty:.1f}" text-anchor="middle" dominant-baseline="middle" '
+                 f'font-size="13" font-weight="700" fill="{C["moon"]}" '
+                 f'font-family="Georgia, serif">As</text>')
+
+    # planets — birth (ivory) in the outer part of the body ring, transits (red) closer in
+    def place_bodies(bodies, ring_r, color_fn):
+        by_sign = {}
+        for b in bodies:
+            if b["key"] == "As":
+                continue
+            by_sign.setdefault(b["sign"], []).append(b)
+        for s, blist in by_sign.items():
+            n = len(blist)
+            spread = 18
+            base_angle = sign_center_angle(s)
+            for i, b in enumerate(blist):
+                off = (i - (n - 1) / 2) * spread
+                px, py = _wheel_point(cx, cy, ring_r, base_angle + off)
+                fill = color_fn(b)
+                retro_mark = "℞" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
+                deg = math.floor(b["inSign"])
+                parts.append(
+                    f'<text x="{px:.1f}" y="{py:.1f}" text-anchor="middle" dominant-baseline="middle" '
+                    f'font-size="12" font-weight="700" fill="{fill}" font-family="Georgia, serif">{b["key"]}'
+                    f'<tspan font-size="8" fill="{fill}" font-family="monospace"> {deg}°{retro_mark}</tspan></text>'
+                )
+
+    place_bodies(birth_bodies, R_body_ring_out - 30, lambda b: C["ivory"])
+    place_bodies(transit_bodies, R_body_ring_in + 15, lambda b: C["sindoor"])
+
+    # centre Oṃ symbol
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="30" fill="{C["panel"]}" stroke="{C["gold"]}" stroke-width="1.5"/>')
+    parts.append(f'<text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="middle" '
+                 f'font-size="30" fill="{C["gold"]}">ॐ</text>')
 
     parts.append("</svg>")
     return "".join(parts)
@@ -1542,15 +1630,25 @@ tdict = {t["key"]: t for t in transit_chart["bodies"]}
 c1, c2 = st.columns([2, 1])
 
 with c1:
+    chart_style = st.radio(
+        "Chart style", ["North Indian (diamond)", "Circular (rāśi wheel)"],
+        horizontal=True, label_visibility="collapsed",
+    )
     st.markdown(
         f'<div class="kcard"><h4>Janma Kuṇḍalī + Gochara '
         f'<span class="kmuted" style="text-transform:none;letter-spacing:normal;font-size:13px;">'
         f'&nbsp;&nbsp;{form["city"][0]} · transits {transit_label}</span></h4>',
         unsafe_allow_html=True,
     )
-    svg = build_svg_chart(birth_chart["bodies"], transit_chart["bodies"], b_asc["sign"])
+    if chart_style.startswith("Circular"):
+        svg = build_circular_svg_chart(birth_chart["bodies"], transit_chart["bodies"],
+                                        b_asc["sign"], b_asc["inSign"])
+        height = 500
+    else:
+        svg = build_svg_chart(birth_chart["bodies"], transit_chart["bodies"], b_asc["sign"])
+        height = 470
     st.components.v1.html(
-        f'<div style="display:flex;justify-content:center;">{svg}</div>', height=470
+        f'<div style="display:flex;justify-content:center;">{svg}</div>', height=height
     )
     st.markdown(
         f"""
