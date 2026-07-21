@@ -542,8 +542,8 @@ def chara_karaka(degrees_in_sign: dict) -> dict:
 # CHART COMPUTATION
 # ============================================================
 
-def compute_chart(y: int, mo: int, dd: int, hh: int, mm: int, lat: float, lon: float, tz: float) -> dict:
-    ut_hours = hh + mm / 60 - tz
+def compute_chart(y: int, mo: int, dd: int, hh: int, mm: int, lat: float, lon: float, tz: float, ss: int = 0) -> dict:
+    ut_hours = hh + mm / 60 + ss / 3600 - tz
     jd = julian_day(y, mo, dd, ut_hours)
     ayan_date = ayanamsa(jd)
 
@@ -583,7 +583,7 @@ def compute_chart(y: int, mo: int, dd: int, hh: int, mm: int, lat: float, lon: f
     # (time elapsed since sunrise, in ghatis) measured from the Sun's sidereal longitude.
     sunrise_ut = sunrise_utc_hours(y, mo, dd, lat, lon)
     sunrise_local = sunrise_ut + tz
-    birth_local_hours = hh + mm / 60.0
+    birth_local_hours = hh + mm / 60.0 + ss / 3600.0
     ishta_hours = birth_local_hours - sunrise_local
     if ishta_hours < 0:
         ishta_hours += 24.0
@@ -709,7 +709,7 @@ def compute_chart(y: int, mo: int, dd: int, hh: int, mm: int, lat: float, lon: f
     start_lord = nak_idx % 9
     balance_years = (1 - nak_frac) * DASHA_YEARS[start_lord]
 
-    birth_dt_utc = datetime(y, mo, dd, hh, mm) - timedelta(hours=tz)
+    birth_dt_utc = datetime(y, mo, dd, hh, mm, ss) - timedelta(hours=tz)
     YEAR_DAYS = 365.25
     dashas = []
     cursor = birth_dt_utc
@@ -1330,8 +1330,10 @@ with col3:
     )
 
 with col4:
-    default_tob = dtime.fromisoformat(saved_profile["tob"]) if (saved_profile and saved_profile.get("tob")) else dtime(12, 16)
-    tob = st.time_input("Time (24h, local)", value=default_tob)
+    # step=1 unlocks second-level precision: the widget becomes a free-text
+    # HH:MM:SS field instead of the coarse minute-only dropdown.
+    default_tob = dtime.fromisoformat(saved_profile["tob"]) if (saved_profile and saved_profile.get("tob")) else dtime(12, 16, 0)
+    tob = st.time_input("Time (24h, local)", value=default_tob, step=1)
 
 with col5:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -1357,6 +1359,7 @@ lat, lon, tz = form["city"][2], form["city"][3], form["city"][4]
 birth_chart = compute_chart(
     form["dob"].year, form["dob"].month, form["dob"].day,
     form["tob"].hour, form["tob"].minute, lat, lon, tz,
+    ss=form["tob"].second,
 )
 
 refresh = st.button("🔄 Refresh transits (updates to current time)")
@@ -1364,6 +1367,7 @@ now_local = now_in_city(tz)
 transit_chart = compute_chart(
     now_local.year, now_local.month, now_local.day,
     now_local.hour, now_local.minute, lat, lon, tz,
+    ss=now_local.second,
 )
 transit_label = now_local.strftime("%d-%m-%Y %H:%M")
 
