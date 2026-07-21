@@ -1330,10 +1330,15 @@ with col3:
     )
 
 with col4:
-    # step=1 unlocks second-level precision: the widget becomes a free-text
-    # HH:MM:SS field instead of the coarse minute-only dropdown.
+    # st.time_input only supports step sizes of 60s-23h (Streamlit won't allow
+    # second-level step), so minutes come from the picker and seconds come
+    # from a separate number input alongside it, then the two are combined.
     default_tob = dtime.fromisoformat(saved_profile["tob"]) if (saved_profile and saved_profile.get("tob")) else dtime(12, 16, 0)
-    tob = st.time_input("Time (24h, local)", value=default_tob, step=1)
+    tob_minute_part = st.time_input("Time (24h, local)", value=default_tob.replace(second=0, microsecond=0))
+    tob_seconds = st.number_input(
+        "Seconds", min_value=0, max_value=59, value=default_tob.second, step=1, key="tob_seconds"
+    )
+    tob = tob_minute_part.replace(second=int(tob_seconds))
 
 with col5:
     st.markdown("<br>", unsafe_allow_html=True)
