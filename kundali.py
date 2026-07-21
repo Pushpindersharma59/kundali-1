@@ -1330,15 +1330,26 @@ with col3:
     )
 
 with col4:
-    # st.time_input only supports step sizes of 60s-23h (Streamlit won't allow
-    # second-level step), so minutes come from the picker and seconds come
-    # from a separate number input alongside it, then the two are combined.
+    # st.time_input's native browser widget often only allows clicking spinner
+    # arrows, not typing digits directly. Plain number_input boxes are always
+    # typable, so hour/minute/second are entered as three separate fields
+    # and combined into a time object below.
     default_tob = dtime.fromisoformat(saved_profile["tob"]) if (saved_profile and saved_profile.get("tob")) else dtime(12, 16, 0)
-    tob_minute_part = st.time_input("Time (24h, local)", value=default_tob.replace(second=0, microsecond=0))
-    tob_seconds = st.number_input(
-        "Seconds", min_value=0, max_value=59, value=default_tob.second, step=1, key="tob_seconds"
-    )
-    tob = tob_minute_part.replace(second=int(tob_seconds))
+    st.markdown('<p style="margin-bottom:2px;">Time (24h, local)</p>', unsafe_allow_html=True)
+    th_col, tm_col, ts_col = st.columns(3)
+    with th_col:
+        tob_hour = st.number_input(
+            "Hour", min_value=0, max_value=23, value=default_tob.hour, step=1, key="tob_hour"
+        )
+    with tm_col:
+        tob_minute = st.number_input(
+            "Minute", min_value=0, max_value=59, value=default_tob.minute, step=1, key="tob_minute"
+        )
+    with ts_col:
+        tob_second = st.number_input(
+            "Second", min_value=0, max_value=59, value=default_tob.second, step=1, key="tob_second"
+        )
+    tob = dtime(int(tob_hour), int(tob_minute), int(tob_second))
 
 with col5:
     st.markdown("<br>", unsafe_allow_html=True)
