@@ -186,6 +186,134 @@ def sunrise_utc_hours(y: int, mo: int, dd: int, lat: float, lon: float) -> float
 
 
 # ============================================================
+# DIVISIONAL (VARGA) CHARTS — standard Parashari reckoning rules.
+# Each rule maps (rāśi index 0-11, segment index within that rāśi) -> resulting sign.
+# ============================================================
+
+VARGA_DIVISORS = {
+    "D1": 1, "D2": 2, "D3": 3, "D4": 4, "D6": 6, "D7": 7, "D9": 9,
+    "D10": 10, "D11": 11, "D12": 12, "D16": 16, "D20": 20, "D24": 24,
+    "D27": 27, "D60": 60,
+}
+VARGA_OPTIONS = ["D1", "D2", "D3", "D4", "D6", "D7", "D9", "D10", "D11",
+                  "D12", "D16", "D20", "D24", "D27", "D60"]
+
+
+def _varga_D2(sign, seg):  # Hora: alternates Leo/Cancer
+    odd = sign % 2 == 0  # Ar,Ge,Le,Li,Sg,Aq
+    if odd:
+        return 4 if seg == 0 else 3
+    return 3 if seg == 0 else 4
+
+
+def _varga_D3(sign, seg):
+    return (sign + seg * 4) % 12
+
+
+def _varga_D4(sign, seg):
+    return (sign + seg * 3) % 12
+
+
+def _varga_D6(sign, seg):
+    start = 0 if sign % 2 == 0 else 6
+    return (start + seg) % 12
+
+
+def _varga_D7(sign, seg):
+    start = sign if sign % 2 == 0 else (sign + 6) % 12
+    return (start + seg) % 12
+
+
+def _varga_D9(sign, seg):
+    if sign % 3 == 0:
+        start = sign
+    elif sign % 3 == 1:
+        start = (sign + 8) % 12
+    else:
+        start = (sign + 4) % 12
+    return (start + seg) % 12
+
+
+def _varga_D10(sign, seg):
+    start = sign if sign % 2 == 0 else (sign + 8) % 12
+    return (start + seg) % 12
+
+
+def _varga_D11(sign, seg):
+    return ((sign + 11) + seg) % 12
+
+
+def _varga_D12(sign, seg):
+    return (sign + seg) % 12
+
+
+def _varga_D16(sign, seg):
+    m = sign % 3
+    start = 0 if m == 0 else (4 if m == 1 else 8)
+    return (start + seg) % 12
+
+
+def _varga_D20(sign, seg):
+    m = sign % 3
+    start = 0 if m == 0 else (8 if m == 1 else 4)
+    return (start + seg) % 12
+
+
+def _varga_D24(sign, seg):
+    start = 4 if sign % 2 == 0 else 3
+    return (start + seg) % 12
+
+
+def _varga_D27(sign, seg):
+    elem = sign % 4
+    start = [0, 3, 6, 9][elem]
+    return (start + seg) % 12
+
+
+def _varga_D60(sign, seg):
+    return (sign * 2 + seg) % 12
+
+
+_VARGA_FUNCS = {
+    2: _varga_D2, 3: _varga_D3, 4: _varga_D4, 6: _varga_D6, 7: _varga_D7,
+    9: _varga_D9, 10: _varga_D10, 11: _varga_D11, 12: _varga_D12,
+    16: _varga_D16, 20: _varga_D20, 24: _varga_D24, 27: _varga_D27, 60: _varga_D60,
+}
+
+
+def varga_sign(lon_sid: float, varga_key: str):
+    """Returns (resulting_sign 0-11, synthetic degree-in-sign 0-30) for a sidereal
+    longitude in the given divisional chart. The degree is the fractional position
+    within the division scaled back up to 30°, so the varga chart still shows a
+    coherent per-graha degree the way the reference site does."""
+    divisor = VARGA_DIVISORS[varga_key]
+    sign = math.floor(lon_sid / 30)
+    in_sign = lon_sid - sign * 30
+    if divisor == 1:
+        return sign, in_sign
+    seg_size = 30.0 / divisor
+    seg = min(int(math.floor(in_sign / seg_size)), divisor - 1)
+    frac = (in_sign - seg * seg_size) / seg_size
+    result_sign = _VARGA_FUNCS[divisor](sign, seg)
+    return result_sign, frac * 30
+
+
+def make_varga_bodies(bodies, varga_key: str):
+    """Re-maps a list of body dicts (as produced by compute_chart) onto a divisional
+    chart, replacing sign/inSign but leaving key/retro/combust/etc. untouched."""
+    if varga_key == "D1":
+        return bodies
+    out = []
+    for b in bodies:
+        vsign, vdeg = varga_sign(b["lon"], varga_key)
+        nb = dict(b)
+        nb["sign"] = vsign
+        nb["inSign"] = vdeg
+        out.append(nb)
+    return out
+
+
+# ============================================================
 # STATIC TABLES (same as the original)
 # ============================================================
 
@@ -634,7 +762,7 @@ def now_in_city(tz: float) -> datetime:
 # ============================================================
 
 C = {
-    "bg": "#FFF6D9", "panel": "#FFFFFF", "panelSoft": "#FFF3BE", "line": "#F0E2A8",
+    "bg": "#FFF9C4", "panel": "#FFFDE7", "panelSoft": "#FFF3B0", "line": "#F0DE94",
     "gold": "#B8842E", "ivory": "#3A2E1F", "muted": "#7A6F5C", "sindoor": "#C4462B",
     "moon": "#3A5B8C",
 }
@@ -670,7 +798,7 @@ def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int) -> str:
         '<svg viewBox="0 0 400 400" width="400" height="400" '
         'xmlns="http://www.w3.org/2000/svg" style="display:block;">',
         '<defs><radialGradient id="cbg" cx="50%" cy="50%" r="70%">'
-        '<stop offset="0%" stop-color="#FFFDF7" /><stop offset="100%" stop-color="#F3EAD3" />'
+        '<stop offset="0%" stop-color="#FFFDE7" /><stop offset="100%" stop-color="#FFF3B0" />'
         '</radialGradient></defs>',
         f'<rect x="2" y="2" width="396" height="396" fill="url(#cbg)" stroke="{C["gold"]}" stroke-width="2" />',
         f'<line x1="2" y1="2" x2="398" y2="398" stroke="{C["gold"]}" stroke-width="1" opacity="0.85" />',
@@ -706,10 +834,10 @@ def _wheel_point(cx, cy, r, clockwise_deg):
 def build_circular_svg_chart(birth_bodies, transit_bodies, asc_sign: int, asc_deg_in_sign: float) -> str:
     cx, cy = 300, 300
     R_outer = 280
-    R_nak_out, R_nak_in = 272, 240
-    R_sign_out, R_sign_in = 240, 205
-    R_house_num = 185
-    R_body_ring_out, R_body_ring_in = 205, 60
+    R_nak_out, R_nak_in = 272, 232
+    R_sign_out, R_sign_in = 232, 198
+    R_house_num = 178
+    R_body_ring_out, R_body_ring_in = 198, 60
 
     def sign_center_angle(sign_idx):
         return -(sign_idx * 30) % 360
@@ -721,22 +849,40 @@ def build_circular_svg_chart(birth_bodies, transit_bodies, asc_sign: int, asc_de
         f'<svg viewBox="0 0 {2*cx} {2*cy}" width="400" height="400" '
         'xmlns="http://www.w3.org/2000/svg" style="display:block;">',
         '<defs><radialGradient id="cwheel" cx="50%" cy="50%" r="70%">'
-        '<stop offset="0%" stop-color="#FFFDF7" /><stop offset="100%" stop-color="#F6EBCF" />'
+        '<stop offset="0%" stop-color="#FFFDE7" /><stop offset="100%" stop-color="#FFF3B0" />'
         '</radialGradient></defs>',
         f'<circle cx="{cx}" cy="{cy}" r="{R_outer}" fill="url(#cwheel)" stroke="{C["gold"]}" stroke-width="2"/>',
         f'<circle cx="{cx}" cy="{cy}" r="{R_nak_in}" fill="none" stroke="{C["line"]}" stroke-width="1"/>',
         f'<circle cx="{cx}" cy="{cy}" r="{R_sign_in}" fill="none" stroke="{C["gold"]}" stroke-width="1.2"/>',
     ]
 
+    nak_span = 360 / 27
+    nak_half = nak_span / 2
+    pada_step = nak_span / 4
+
     for n in range(27):
-        boundary = (-(n * (360 / 27)) + (360 / 54)) % 360
+        boundary = (-(n * nak_span) + nak_half) % 360
         x1, y1 = _wheel_point(cx, cy, R_nak_in, boundary)
         x2, y2 = _wheel_point(cx, cy, R_nak_out, boundary)
         parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
                       f'stroke="{C["line"]}" stroke-width="1"/>')
-        lx, ly = _wheel_point(cx, cy, (R_nak_out + R_nak_in) / 2, nak_center_angle(n))
+        lx, ly = _wheel_point(cx, cy, R_nak_out - 7, nak_center_angle(n))
         parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="middle" dominant-baseline="middle" '
-                      f'font-size="9" fill="{C["muted"]}" font-family="monospace">{n+1} {NAK_ABBR[n]}</text>')
+                      f'font-size="8.5" fill="{C["muted"]}" font-family="monospace">{n+1} {NAK_ABBR[n]}</text>')
+
+        # pada sub-ticks (3 internal dividers) + pada numbers (1-4) in the inner part of the ring
+        center = nak_center_angle(n)
+        for k in range(1, 4):
+            p_ang = (center - nak_half + k * pada_step) % 360
+            px1, py1 = _wheel_point(cx, cy, R_nak_in, p_ang)
+            px2, py2 = _wheel_point(cx, cy, R_nak_in + 13, p_ang)
+            parts.append(f'<line x1="{px1:.1f}" y1="{py1:.1f}" x2="{px2:.1f}" y2="{py2:.1f}" '
+                          f'stroke="{C["line"]}" stroke-width="0.75"/>')
+        for k in range(4):
+            pc_ang = (center - nak_half + (k + 0.5) * pada_step) % 360
+            plx, ply = _wheel_point(cx, cy, R_nak_in + 6, pc_ang)
+            parts.append(f'<text x="{plx:.1f}" y="{ply:.1f}" text-anchor="middle" dominant-baseline="middle" '
+                          f'font-size="6.5" fill="{C["muted"]}" font-family="monospace">{k+1}</text>')
 
     for s in range(12):
         boundary = (-(s * 30) + 15) % 360
@@ -951,17 +1097,28 @@ tdict = {t["key"]: t for t in transit_chart["bodies"]}
 core_birth_bodies = [b for b in birth_chart["bodies"] if b["key"] in CORE_KEYS]
 core_transit_bodies = [b for b in transit_chart["bodies"] if b["key"] in CORE_KEYS]
 
-# ---- Row 1: Diamond chart + Circular chart side by side, then Pañcāṅga ----
-c1, c2, c3 = st.columns([1.15, 1.15, 1])
+# ---- Row 1: Diamond chart + Circular chart, each with its own D1..D60 selector ----
+c1, c2 = st.columns([1, 1])
 
 with c1:
     st.markdown(
-        f'<div class="kcard"><h4>North Indian (D1)'
-        f'<span class="kmuted" style="text-transform:none;letter-spacing:normal;font-size:12px;">'
-        f'&nbsp;&nbsp;{form["city"][0]}</span></h4>',
+        '<div class="kcard"><h4 style="display:flex;justify-content:space-between;'
+        'align-items:center;border-bottom:none;margin-bottom:6px;padding-bottom:0;">'
+        '<span>North Indian</span></h4>',
         unsafe_allow_html=True,
     )
-    svg_diamond = build_svg_chart(core_birth_bodies, core_transit_bodies, b_asc["sign"])
+    diamond_varga = st.selectbox(
+        "Chart", VARGA_OPTIONS, index=0, key="diamond_varga_select", label_visibility="collapsed"
+    )
+    st.markdown(
+        f'<p class="kmuted" style="font-size:12px;margin:2px 0 10px 0;'
+        f'border-bottom:2px solid {C["line"]};padding-bottom:8px;">{form["city"][0]}</p>',
+        unsafe_allow_html=True,
+    )
+    dv_birth = make_varga_bodies(core_birth_bodies, diamond_varga)
+    dv_transit = make_varga_bodies(core_transit_bodies, diamond_varga)
+    dv_asc = next(b for b in dv_birth if b["key"] == "As")
+    svg_diamond = build_svg_chart(dv_birth, dv_transit, dv_asc["sign"])
     st.components.v1.html(
         f'<div style="display:flex;justify-content:center;">{svg_diamond}</div>', height=420
     )
@@ -969,55 +1126,32 @@ with c1:
 
 with c2:
     st.markdown(
-        f'<div class="kcard"><h4>Rāśi Wheel (D1)'
-        f'<span class="kmuted" style="text-transform:none;letter-spacing:normal;font-size:12px;">'
-        f'&nbsp;&nbsp;transits {transit_label}</span></h4>',
+        '<div class="kcard"><h4 style="display:flex;justify-content:space-between;'
+        'align-items:center;border-bottom:none;margin-bottom:6px;padding-bottom:0;">'
+        '<span>Rāśi Wheel</span></h4>',
         unsafe_allow_html=True,
     )
+    circular_varga = st.selectbox(
+        "Chart", VARGA_OPTIONS, index=0, key="circular_varga_select", label_visibility="collapsed"
+    )
+    st.markdown(
+        f'<p class="kmuted" style="font-size:12px;margin:2px 0 10px 0;'
+        f'border-bottom:2px solid {C["line"]};padding-bottom:8px;">transits {transit_label}</p>',
+        unsafe_allow_html=True,
+    )
+    cv_birth = make_varga_bodies(core_birth_bodies, circular_varga)
+    cv_transit = make_varga_bodies(core_transit_bodies, circular_varga)
+    cv_asc = next(b for b in cv_birth if b["key"] == "As")
     svg_circular = build_circular_svg_chart(
-        core_birth_bodies, core_transit_bodies, b_asc["sign"], b_asc["inSign"]
+        cv_birth, cv_transit, cv_asc["sign"], cv_asc["inSign"]
     )
     st.components.v1.html(
         f'<div style="display:flex;justify-content:center;">{svg_circular}</div>', height=420
     )
     st.markdown("</div>", unsafe_allow_html=True)
 
-with c3:
-    st.markdown('<div class="kcard"><h4>Pañcāṅga · at birth</h4>', unsafe_allow_html=True)
-    rows = [
-        ("Vāra", birth_chart["panchanga"]["vara"]),
-        ("Tithi", f"{birth_chart['panchanga']['paksha']} {birth_chart['panchanga']['tithiName']} "
-                  f"· {birth_chart['panchanga']['tithiPct']:.1f}%"),
-        ("Nakṣatra", f"{NAKSHATRAS[birth_chart['panchanga']['nakIdx']]} · pada "
-                      f"{birth_chart['panchanga']['nakPada']}"),
-        ("Yoga", YOGAS[birth_chart["panchanga"]["yogaIdx"]]),
-        ("Karaṇa", birth_chart["panchanga"]["karana"]),
-        ("Ayanāṁśa", f"{fmt_deg(birth_chart['ayanDate'])} (Lahiri)"),
-        ("Lagna", f"{SIGNS[b_asc['sign']]} {fmt_deg(b_asc['inSign'])}"),
-        ("Moon sign", SIGNS[b_moon["sign"]]),
-    ]
-    rows_html = "".join(
-        f'<div class="krow"><span class="kmuted">{k}</span><span>{v}</span></div>' for k, v in rows
-    )
-    st.markdown(
-        f'{rows_html}'
-        f'<p class="ksindoor" style="font-size:14px;margin-top:10px;">'
-        f'Now: {tp["paksha"]} {tp["tithiName"]} · {NAKSHATRAS[tp["nakIdx"]]}</p></div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f"""
-        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;">
-            <span><span style="color:{C['ivory']}">●</span> Birth</span>
-            <span class="ksindoor"><span style="color:{C['sindoor']}">●</span> Transit · now</span>
-            <span class="kmuted">℞ retrograde</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-# ---- Row 2: Nakṣatra table + Vimśottarī Mahādaśā side by side -------------
-c4, c5 = st.columns([1, 1])
+# ---- Row 2: Nakṣatra table + Vimśottarī Mahādaśā + Pañcāṅga -------------
+c4, c5, c6 = st.columns([1, 1, 0.8])
 
 with c4:
     st.markdown('<div class="kcard"><h4>Nakṣatra · birth</h4>', unsafe_allow_html=True)
@@ -1086,6 +1220,40 @@ with c5:
         '<p class="kmuted" style="font-size:13px;margin-top:10px;">'
         "🔶 = currently running mahādaśā. Click any row to see its antardaśā (sub-periods), "
         "with pratyantardaśā (sub-sub-periods) listed underneath each.</p></div>",
+        unsafe_allow_html=True,
+    )
+
+with c6:
+    st.markdown('<div class="kcard"><h4>Pañcāṅga · at birth</h4>', unsafe_allow_html=True)
+    rows = [
+        ("Vāra", birth_chart["panchanga"]["vara"]),
+        ("Tithi", f"{birth_chart['panchanga']['paksha']} {birth_chart['panchanga']['tithiName']} "
+                  f"· {birth_chart['panchanga']['tithiPct']:.1f}%"),
+        ("Nakṣatra", f"{NAKSHATRAS[birth_chart['panchanga']['nakIdx']]} · pada "
+                      f"{birth_chart['panchanga']['nakPada']}"),
+        ("Yoga", YOGAS[birth_chart["panchanga"]["yogaIdx"]]),
+        ("Karaṇa", birth_chart["panchanga"]["karana"]),
+        ("Ayanāṁśa", f"{fmt_deg(birth_chart['ayanDate'])} (Lahiri)"),
+        ("Lagna", f"{SIGNS[b_asc['sign']]} {fmt_deg(b_asc['inSign'])}"),
+        ("Moon sign", SIGNS[b_moon["sign"]]),
+    ]
+    rows_html = "".join(
+        f'<div class="krow"><span class="kmuted">{k}</span><span>{v}</span></div>' for k, v in rows
+    )
+    st.markdown(
+        f'{rows_html}'
+        f'<p class="ksindoor" style="font-size:14px;margin-top:10px;">'
+        f'Now: {tp["paksha"]} {tp["tithiName"]} · {NAKSHATRAS[tp["nakIdx"]]}</p></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"""
+        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;">
+            <span><span style="color:{C['ivory']}">●</span> Birth</span>
+            <span class="ksindoor"><span style="color:{C['sindoor']}">●</span> Transit · now</span>
+            <span class="kmuted">℞ retrograde</span>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
