@@ -11,6 +11,16 @@ Run with:
 """
 
 import math
+import hashlib
+import hmac
+import os
+import re
+import secrets
+import smtplib
+import sqlite3
+import ssl
+import time
+from email.mime.text import MIMEText
 from datetime import datetime, timedelta, date, time as dtime
 
 import streamlit as st
@@ -795,7 +805,7 @@ def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int) -> str:
         )
 
     parts = [
-        '<svg viewBox="0 0 400 400" width="400" height="400" '
+        '<svg viewBox="0 0 400 400" width="720" height="720" '
         'xmlns="http://www.w3.org/2000/svg" style="display:block;">',
         '<defs><radialGradient id="cbg" cx="50%" cy="50%" r="70%">'
         '<stop offset="0%" stop-color="#FFFDE7" /><stop offset="100%" stop-color="#FFF3B0" />'
@@ -846,7 +856,7 @@ def build_circular_svg_chart(birth_bodies, transit_bodies, asc_sign: int, asc_de
         return -(nak_idx * (360 / 27)) % 360
 
     parts = [
-        f'<svg viewBox="0 0 {2*cx} {2*cy}" width="400" height="400" '
+        f'<svg viewBox="0 0 {2*cx} {2*cy}" width="720" height="720" '
         'xmlns="http://www.w3.org/2000/svg" style="display:block;">',
         '<defs><radialGradient id="cwheel" cx="50%" cy="50%" r="70%">'
         '<stop offset="0%" stop-color="#FFFDE7" /><stop offset="100%" stop-color="#FFF3B0" />'
@@ -950,6 +960,341 @@ def build_circular_svg_chart(birth_bodies, transit_bodies, asc_sign: int, asc_de
 
 
 # ============================================================
+# AUTH / DATABASE  — accounts, email verification, saved profiles
+# ============================================================
+#
+# Storage: a local SQLite file next to this script. Fine for a single-instance
+# deployment; if you scale to multiple app instances behind a load balancer,
+# swap DB_PATH for a shared Postgres/MySQL connection string instead — the
+# functions below are the only place that would need to change.
+#
+# Email sending: configured via Streamlit secrets (.streamlit/secrets.toml
+# locally, or the "Secrets" panel on Streamlit Community Cloud):
+#
+#   [smtp]
+#   host = "smtp.yourprovider.com"
+#   port = 587
+#   user = "you@yourdomain.com"
+#   password = "your-smtp-password-or-app-password"
+#   from_addr = "Kundali <you@yourdomain.com>"
+#
+# Until smtp secrets are configured, the app falls back to a clearly-labeled
+# "developer mode" that shows the verification code on screen instead of
+# emailing it — remove that fallback (see DEV_SHOW_CODE below) before going
+# live so real signups can't self-verify without owning the inbox.
+
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kundali_users.db")
+
+DISPOSABLE_EMAIL_DOMAINS = {
+    "mailinator.com", "tempmail.com", "temp-mail.org", "10minutemail.com",
+    "guerrillamail.com", "guerrillamail.info", "yopmail.com", "trashmail.com",
+    "fakeinbox.com", "dispostable.com", "throwawaymail.com", "getnada.com",
+    "sharklasers.com", "mintemail.com", "maildrop.cc", "moakt.com",
+    "mailnesia.com", "spamgourmet.com", "33mail.com", "emailondeck.com",
+    "discard.email", "mytemp.email", "tempinbox.com", "burnermail.io",
+}
+
+EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
+
+
+def get_conn():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_conn()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            pw_hash TEXT NOT NULL,
+            pw_salt TEXT NOT NULL,
+            verified INTEGER NOT NULL DEFAULT 0,
+            verify_code TEXT,
+            verify_expires REAL,
+            created_at REAL NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS profiles (
+            user_id INTEGER PRIMARY KEY,
+            name TEXT, dob TEXT, tob TEXT,
+            city_name TEXT, city_region TEXT, lat REAL, lon REAL, tz REAL,
+            updated_at REAL,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def hash_password(password: str, salt_hex: str = None):
+    if salt_hex is None:
+        salt_hex = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), 200_000
+    ).hex()
+    return digest, salt_hex
+
+
+def check_password(password: str, salt_hex: str, stored_hash: str) -> bool:
+    digest, _ = hash_password(password, salt_hex)
+    return hmac.compare_digest(digest, stored_hash)
+
+
+def is_allowed_email(email: str):
+    """Format + disposable-domain check. This is a first line of defense only —
+    the real anti-fake-email control is the mandatory verification code sent
+    to the address below."""
+    if not EMAIL_RE.match(email or ""):
+        return False, "That doesn't look like a valid email address."
+    domain = email.split("@")[-1].lower()
+    if domain in DISPOSABLE_EMAIL_DOMAINS:
+        return False, "Temporary/disposable email addresses aren't allowed — please use a real address."
+    return True, ""
+
+
+def smtp_configured() -> bool:
+    try:
+        return "smtp" in st.secrets and all(
+            k in st.secrets["smtp"] for k in ("host", "port", "user", "password")
+        )
+    except Exception:
+        return False
+
+
+# Leave this False for any real/public deployment: it guarantees nobody can
+# verify an email address they don't actually control. Only flip to True
+# temporarily on your own machine, before SMTP secrets are configured, to
+# test the signup flow — never in a deployed/commercial build.
+DEV_SHOW_CODE_IF_NO_SMTP = False
+
+
+def send_verification_email(to_email: str, code: str) -> tuple:
+    """Returns (sent_ok, message)."""
+    if not smtp_configured():
+        if DEV_SHOW_CODE_IF_NO_SMTP:
+            return False, f"[DEV MODE — SMTP not configured] Verification code: {code}"
+        return False, "Email sending isn't configured on this server yet. Contact the site admin."
+    cfg = st.secrets["smtp"]
+    msg = MIMEText(
+        f"Your Kuṇḍalī verification code is: {code}\n\n"
+        f"This code expires in 15 minutes. If you didn't request this, ignore this email."
+    )
+    msg["Subject"] = "Your Kuṇḍalī verification code"
+    msg["From"] = cfg.get("from_addr", cfg["user"])
+    msg["To"] = to_email
+    try:
+        context = ssl.create_default_context()
+        with smtplib.SMTP(cfg["host"], int(cfg["port"])) as server:
+            server.starttls(context=context)
+            server.login(cfg["user"], cfg["password"])
+            server.sendmail(msg["From"], [to_email], msg.as_string())
+        return True, "Verification code sent — check your inbox (and spam folder)."
+    except Exception as e:
+        return False, f"Couldn't send the verification email ({e}). Please try again shortly."
+
+
+def create_pending_user(username: str, email: str, password: str):
+    conn = get_conn()
+    pw_hash, pw_salt = hash_password(password)
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    expires = time.time() + 15 * 60
+    try:
+        conn.execute(
+            "INSERT INTO users (username, email, pw_hash, pw_salt, verified, verify_code, "
+            "verify_expires, created_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?)",
+            (username, email.lower(), pw_hash, pw_salt, code, expires, time.time()),
+        )
+        conn.commit()
+        return True, code, ""
+    except sqlite3.IntegrityError:
+        return False, None, "That username or email is already registered."
+    finally:
+        conn.close()
+
+
+def regenerate_code(email: str):
+    conn = get_conn()
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    expires = time.time() + 15 * 60
+    conn.execute(
+        "UPDATE users SET verify_code=?, verify_expires=? WHERE email=? AND verified=0",
+        (code, expires, email.lower()),
+    )
+    conn.commit()
+    conn.close()
+    return code
+
+
+def verify_code(email: str, code: str):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT verify_code, verify_expires FROM users WHERE email=? AND verified=0",
+        (email.lower(),),
+    ).fetchone()
+    if row is None:
+        conn.close()
+        return False, "No pending signup for that email."
+    if time.time() > row["verify_expires"]:
+        conn.close()
+        return False, "That code has expired — request a new one."
+    if not hmac.compare_digest(str(row["verify_code"]), code.strip()):
+        conn.close()
+        return False, "Incorrect code."
+    conn.execute(
+        "UPDATE users SET verified=1, verify_code=NULL, verify_expires=NULL WHERE email=?",
+        (email.lower(),),
+    )
+    conn.commit()
+    conn.close()
+    return True, "Email verified — you can log in now."
+
+
+def authenticate(identifier: str, password: str):
+    """identifier = username or email. Returns (user_dict_or_None, message)."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM users WHERE username=? OR email=?", (identifier, identifier.lower())
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None, "No account with that username/email."
+    if not check_password(password, row["pw_salt"], row["pw_hash"]):
+        return None, "Incorrect password."
+    if not row["verified"]:
+        return None, "Please verify your email before logging in."
+    return dict(row), ""
+
+
+def load_profile(user_id: int):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM profiles WHERE user_id=?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def save_profile(user_id: int, name, dob_iso, tob_iso, city_name, city_region, lat, lon, tz):
+    conn = get_conn()
+    conn.execute(
+        """
+        INSERT INTO profiles (user_id, name, dob, tob, city_name, city_region, lat, lon, tz, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            name=excluded.name, dob=excluded.dob, tob=excluded.tob,
+            city_name=excluded.city_name, city_region=excluded.city_region,
+            lat=excluded.lat, lon=excluded.lon, tz=excluded.tz, updated_at=excluded.updated_at
+        """,
+        (user_id, name, dob_iso, tob_iso, city_name, city_region, lat, lon, tz, time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+def render_auth_screen():
+    """Full-page login / signup / verify flow. Returns nothing — sets
+    st.session_state['user'] and reruns once authenticated."""
+    st.markdown(
+        f'<h1 style="color:{C["gold"]}; font-family:Georgia, serif; letter-spacing:0.06em;">Kuṇḍalī</h1>'
+        f'<p class="kmuted" style="margin-top:-10px; font-size:16px;">Sign in to save your birth details '
+        f'and come back to them anytime.</p>',
+        unsafe_allow_html=True,
+    )
+
+    stage = st.session_state.get("auth_stage", "login")
+
+    if stage == "verify":
+        st.markdown('<div class="kcard" style="max-width:440px;"><h4>Verify your email</h4>', unsafe_allow_html=True)
+        pending_email = st.session_state.get("pending_email", "")
+        st.write(f"We sent a 6-digit code to **{pending_email}**.")
+        code = st.text_input("Verification code", max_chars=6, key="verify_code_input")
+        vcol1, vcol2 = st.columns(2)
+        with vcol1:
+            if st.button("Verify", use_container_width=True):
+                ok, msg = verify_code(pending_email, code)
+                if ok:
+                    st.success(msg)
+                    st.session_state["auth_stage"] = "login"
+                    st.session_state.pop("pending_email", None)
+                    st.rerun()
+                else:
+                    st.error(msg)
+        with vcol2:
+            if st.button("Resend code", use_container_width=True):
+                new_code = regenerate_code(pending_email)
+                sent_ok, msg = send_verification_email(pending_email, new_code)
+                (st.info if sent_ok else st.warning)(msg)
+        if st.button("← Back"):
+            st.session_state["auth_stage"] = "login"
+            st.session_state.pop("pending_email", None)
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    tab_login, tab_signup = st.tabs(["Log in", "Sign up"])
+
+    with tab_login:
+        st.markdown('<div class="kcard" style="max-width:440px;">', unsafe_allow_html=True)
+        identifier = st.text_input("Username or email", key="login_identifier")
+        password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Log in", use_container_width=True):
+            if not identifier or not password:
+                st.error("Enter your username/email and password.")
+            else:
+                user, msg = authenticate(identifier.strip(), password)
+                if user:
+                    st.session_state["user"] = {
+                        "id": user["id"], "username": user["username"], "email": user["email"]
+                    }
+                    st.rerun()
+                else:
+                    st.error(msg)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with tab_signup:
+        st.markdown('<div class="kcard" style="max-width:440px;">', unsafe_allow_html=True)
+        su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
+        su_email = st.text_input("Email", key="su_email")
+        su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
+        su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
+        su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
+        if st.button("Create account", use_container_width=True):
+            errors = []
+            if not USERNAME_RE.match(su_username or ""):
+                errors.append("Username must be 3-20 characters: letters, numbers, underscore only.")
+            email_ok, email_msg = is_allowed_email(su_email or "")
+            if not email_ok:
+                errors.append(email_msg)
+            if len(su_pw or "") < 8:
+                errors.append("Password must be at least 8 characters.")
+            if su_pw != su_pw2:
+                errors.append("Passwords don't match.")
+            if not su_terms:
+                errors.append("You must agree to the Terms of Service and Privacy Policy.")
+            if errors:
+                for e in errors:
+                    st.error(e)
+            else:
+                ok, code, msg = create_pending_user(su_username.strip(), su_email.strip(), su_pw)
+                if not ok:
+                    st.error(msg)
+                else:
+                    sent_ok, send_msg = send_verification_email(su_email.strip(), code)
+                    st.session_state["auth_stage"] = "verify"
+                    st.session_state["pending_email"] = su_email.strip().lower()
+                    (st.info if sent_ok else st.warning)(send_msg)
+                    st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ============================================================
 # STREAMLIT APP
 # ============================================================
 
@@ -994,11 +1339,28 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.markdown(
-    f'<h1 style="color:{C["gold"]}; font-family:Georgia, serif; letter-spacing:0.06em;">Kuṇḍalī</h1>'
-    f'<p class="kmuted" style="margin-top:-10px; font-size:18px;">Vedic birth-chart engine · Lahiri ayanamsa · Python build</p>',
-    unsafe_allow_html=True,
-)
+# ---- Auth gate: nothing below runs until the person is logged in ----------
+if "user" not in st.session_state:
+    render_auth_screen()
+    st.stop()
+
+topbar_l, topbar_r = st.columns([4, 1])
+with topbar_l:
+    st.markdown(
+        f'<h1 style="color:{C["gold"]}; font-family:Georgia, serif; letter-spacing:0.06em;">Kuṇḍalī</h1>'
+        f'<p class="kmuted" style="margin-top:-10px; font-size:18px;">Vedic birth-chart engine · Lahiri ayanamsa · Python build</p>',
+        unsafe_allow_html=True,
+    )
+with topbar_r:
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(f'<p class="kmuted" style="text-align:right;">Signed in as <b>{st.session_state["user"]["username"]}</b></p>', unsafe_allow_html=True)
+    if st.button("Log out", use_container_width=True):
+        del st.session_state["user"]
+        st.session_state.pop("form", None)
+        st.rerun()
+
+# ---- Load this user's saved birth details, if any, as form defaults -------
+saved_profile = load_profile(st.session_state["user"]["id"])
 
 # ---- Birth details form -------------------------------------------------
 st.markdown('<div class="kcard"><h4>Birth details</h4>', unsafe_allow_html=True)
@@ -1010,24 +1372,28 @@ use_manual_coords = st.checkbox(
 col1, col2, col3, col4, col5 = st.columns([1.2, 1.6, 1, 1, 0.8])
 
 with col1:
-    name = st.text_input("Name", value="", placeholder="Name of chart")
+    name = st.text_input("Name", value=(saved_profile["name"] if saved_profile else ""), placeholder="Name of chart")
 
 if use_manual_coords:
     # ---- Manual coordinates path: user supplies place name, lat, lon, tz directly ----
+    default_place = saved_profile["city_name"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else ""
+    default_mlat = saved_profile["lat"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 30.21
+    default_mlon = saved_profile["lon"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 74.95
+    default_mtz = saved_profile["tz"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 5.5
     with col2:
-        place_name = st.text_input("Place name (for display only)", value="", placeholder="e.g. Custom Town")
+        place_name = st.text_input("Place name (for display only)", value=default_place, placeholder="e.g. Custom Town")
         mcol1, mcol2, mcol3 = st.columns(3)
         with mcol1:
             manual_lat = st.number_input(
-                "Latitude", min_value=-90.0, max_value=90.0, value=30.21, step=0.0001, format="%.4f"
+                "Latitude", min_value=-90.0, max_value=90.0, value=float(default_mlat), step=0.0001, format="%.4f"
             )
         with mcol2:
             manual_lon = st.number_input(
-                "Longitude", min_value=-180.0, max_value=180.0, value=74.95, step=0.0001, format="%.4f"
+                "Longitude", min_value=-180.0, max_value=180.0, value=float(default_mlon), step=0.0001, format="%.4f"
             )
         with mcol3:
             manual_tz = st.number_input(
-                "UTC offset (h)", min_value=-12.0, max_value=14.0, value=5.5, step=0.25, format="%.2f"
+                "UTC offset (h)", min_value=-12.0, max_value=14.0, value=float(default_mtz), step=0.25, format="%.2f"
             )
         st.caption(
             f"{abs(manual_lat):.4f}°{'N' if manual_lat >= 0 else 'S'}, "
@@ -1036,8 +1402,9 @@ if use_manual_coords:
         )
     city = (place_name if place_name else "Custom location", "Manual entry", manual_lat, manual_lon, manual_tz)
 else:
+    default_city_query = saved_profile["city_name"] if (saved_profile and saved_profile.get("city_region") != "Manual entry") else "Bathinda"
     with col2:
-        city_query = st.text_input("Birth place (city)", value="Bathinda")
+        city_query = st.text_input("Birth place (city)", value=default_city_query)
         matches = [c for c in CITIES if city_query.lower() in (c[0] + " " + c[1]).lower()]
         if not matches:
             matches = CITIES[:8]
@@ -1050,13 +1417,15 @@ else:
         )
 
 with col3:
+    default_dob = date.fromisoformat(saved_profile["dob"]) if (saved_profile and saved_profile.get("dob")) else date(2026, 7, 16)
     dob = st.date_input(
-        "Date of birth", value=date(2026, 7, 16),
+        "Date of birth", value=default_dob,
         min_value=date(1900, 1, 1), max_value=date(2100, 12, 31),
     )
 
 with col4:
-    tob = st.time_input("Time (24h, local)", value=dtime(12, 16))
+    default_tob = dtime.fromisoformat(saved_profile["tob"]) if (saved_profile and saved_profile.get("tob")) else dtime(12, 16)
+    tob = st.time_input("Time (24h, local)", value=default_tob)
 
 with col5:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -1069,7 +1438,11 @@ if "form" not in st.session_state or cast:
     st.session_state["form"] = {
         "name": name, "dob": dob, "tob": tob, "city": city,
     }
-
+    if cast:
+        save_profile(
+            st.session_state["user"]["id"], name, dob.isoformat(), tob.isoformat(),
+            city[0], city[1], city[2], city[3], city[4],
+        )
 form = st.session_state["form"]
 
 # ---- Compute birth chart + live transit ----------------------------------
@@ -1120,7 +1493,7 @@ with c1:
     dv_asc = next(b for b in dv_birth if b["key"] == "As")
     svg_diamond = build_svg_chart(dv_birth, dv_transit, dv_asc["sign"])
     st.components.v1.html(
-        f'<div style="display:flex;justify-content:center;">{svg_diamond}</div>', height=420
+        f'<div style="display:flex;justify-content:center;">{svg_diamond}</div>', height=760
     )
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1146,7 +1519,7 @@ with c2:
         cv_birth, cv_transit, cv_asc["sign"], cv_asc["inSign"]
     )
     st.components.v1.html(
-        f'<div style="display:flex;justify-content:center;">{svg_circular}</div>', height=420
+        f'<div style="display:flex;justify-content:center;">{svg_circular}</div>', height=760
     )
     st.markdown("</div>", unsafe_allow_html=True)
 
