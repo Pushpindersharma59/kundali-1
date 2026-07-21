@@ -16,11 +16,8 @@ import hmac
 import os
 import re
 import secrets
-import smtplib
 import sqlite3
-import ssl
 import time
-from email.mime.text import MIMEText
 from datetime import datetime, timedelta, date, time as dtime
 
 import streamlit as st
@@ -960,7 +957,7 @@ def build_circular_svg_chart(birth_bodies, transit_bodies, asc_sign: int, asc_de
 
 
 # ============================================================
-# AUTH / DATABASE  — accounts, email verification, saved profiles
+# AUTH / DATABASE  — accounts (username + password only), saved profiles
 # ============================================================
 #
 # Storage: a local SQLite file next to this script. Fine for a single-instance
@@ -968,33 +965,12 @@ def build_circular_svg_chart(birth_bodies, transit_bodies, asc_sign: int, asc_de
 # swap DB_PATH for a shared Postgres/MySQL connection string instead — the
 # functions below are the only place that would need to change.
 #
-# Email sending: configured via Streamlit secrets (.streamlit/secrets.toml
-# locally, or the "Secrets" panel on Streamlit Community Cloud):
-#
-#   [smtp]
-#   host = "smtp.yourprovider.com"
-#   port = 587
-#   user = "you@yourdomain.com"
-#   password = "your-smtp-password-or-app-password"
-#   from_addr = "Kundali <you@yourdomain.com>"
-#
-# Until smtp secrets are configured, the app falls back to a clearly-labeled
-# "developer mode" that shows the verification code on screen instead of
-# emailing it — remove that fallback (see DEV_SHOW_CODE below) before going
-# live so real signups can't self-verify without owning the inbox.
+# No email is collected or required. Uniqueness is enforced on username only
+# (case-insensitive), so "PushpinderS" and "pushpinders" are the same account
+# and a second signup with either casing is rejected.
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kundali_users.db")
 
-DISPOSABLE_EMAIL_DOMAINS = {
-    "mailinator.com", "tempmail.com", "temp-mail.org", "10minutemail.com",
-    "guerrillamail.com", "guerrillamail.info", "yopmail.com", "trashmail.com",
-    "fakeinbox.com", "dispostable.com", "throwawaymail.com", "getnada.com",
-    "sharklasers.com", "mintemail.com", "maildrop.cc", "moakt.com",
-    "mailnesia.com", "spamgourmet.com", "33mail.com", "emailondeck.com",
-    "discard.email", "mytemp.email", "tempinbox.com", "burnermail.io",
-}
-
-EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 
 
@@ -1009,13 +985,10 @@ def init_db():
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            email TEXT UNIQUE NOT NULL,
+            username TEXT NOT NULL,
+            username_lower TEXT UNIQUE NOT NULL,
             pw_hash TEXT NOT NULL,
             pw_salt TEXT NOT NULL,
-            verified INTEGER NOT NULL DEFAULT 0,
-            verify_code TEXT,
-            verify_expires REAL,
             created_at REAL NOT NULL
         )
     """)
@@ -1046,128 +1019,44 @@ def check_password(password: str, salt_hex: str, stored_hash: str) -> bool:
     return hmac.compare_digest(digest, stored_hash)
 
 
-def is_allowed_email(email: str):
-    """Format + disposable-domain check. This is a first line of defense only —
-    the real anti-fake-email control is the mandatory verification code sent
-    to the address below."""
-    if not EMAIL_RE.match(email or ""):
-        return False, "That doesn't look like a valid email address."
-    domain = email.split("@")[-1].lower()
-    if domain in DISPOSABLE_EMAIL_DOMAINS:
-        return False, "Temporary/disposable email addresses aren't allowed — please use a real address."
-    return True, ""
+def username_taken(username: str) -> bool:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT 1 FROM users WHERE username_lower=?", (username.lower(),)
+    ).fetchone()
+    conn.close()
+    return row is not None
 
 
-def smtp_configured() -> bool:
-    try:
-        return "smtp" in st.secrets and all(
-            k in st.secrets["smtp"] for k in ("host", "port", "user", "password")
-        )
-    except Exception:
-        return False
-
-
-# Leave this False for any real/public deployment: it guarantees nobody can
-# verify an email address they don't actually control. Only flip to True
-# temporarily on your own machine, before SMTP secrets are configured, to
-# test the signup flow — never in a deployed/commercial build.
-DEV_SHOW_CODE_IF_NO_SMTP = False
-
-
-def send_verification_email(to_email: str, code: str) -> tuple:
-    """Returns (sent_ok, message)."""
-    if not smtp_configured():
-        if DEV_SHOW_CODE_IF_NO_SMTP:
-            return False, f"[DEV MODE — SMTP not configured] Verification code: {code}"
-        return False, "Email sending isn't configured on this server yet. Contact the site admin."
-    cfg = st.secrets["smtp"]
-    msg = MIMEText(
-        f"Your Kuṇḍalī verification code is: {code}\n\n"
-        f"This code expires in 15 minutes. If you didn't request this, ignore this email."
-    )
-    msg["Subject"] = "Your Kuṇḍalī verification code"
-    msg["From"] = cfg.get("from_addr", cfg["user"])
-    msg["To"] = to_email
-    try:
-        context = ssl.create_default_context()
-        with smtplib.SMTP(cfg["host"], int(cfg["port"])) as server:
-            server.starttls(context=context)
-            server.login(cfg["user"], cfg["password"])
-            server.sendmail(msg["From"], [to_email], msg.as_string())
-        return True, "Verification code sent — check your inbox (and spam folder)."
-    except Exception as e:
-        return False, f"Couldn't send the verification email ({e}). Please try again shortly."
-
-
-def create_pending_user(username: str, email: str, password: str):
+def create_user(username: str, password: str):
+    """Returns (ok, message)."""
     conn = get_conn()
     pw_hash, pw_salt = hash_password(password)
-    code = f"{secrets.randbelow(1_000_000):06d}"
-    expires = time.time() + 15 * 60
     try:
         conn.execute(
-            "INSERT INTO users (username, email, pw_hash, pw_salt, verified, verify_code, "
-            "verify_expires, created_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?)",
-            (username, email.lower(), pw_hash, pw_salt, code, expires, time.time()),
+            "INSERT INTO users (username, username_lower, pw_hash, pw_salt, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (username, username.lower(), pw_hash, pw_salt, time.time()),
         )
         conn.commit()
-        return True, code, ""
+        return True, ""
     except sqlite3.IntegrityError:
-        return False, None, "That username or email is already registered."
+        return False, "That username is already taken — pick another one."
     finally:
         conn.close()
 
 
-def regenerate_code(email: str):
-    conn = get_conn()
-    code = f"{secrets.randbelow(1_000_000):06d}"
-    expires = time.time() + 15 * 60
-    conn.execute(
-        "UPDATE users SET verify_code=?, verify_expires=? WHERE email=? AND verified=0",
-        (code, expires, email.lower()),
-    )
-    conn.commit()
-    conn.close()
-    return code
-
-
-def verify_code(email: str, code: str):
+def authenticate(username: str, password: str):
+    """Returns (user_dict_or_None, message)."""
     conn = get_conn()
     row = conn.execute(
-        "SELECT verify_code, verify_expires FROM users WHERE email=? AND verified=0",
-        (email.lower(),),
-    ).fetchone()
-    if row is None:
-        conn.close()
-        return False, "No pending signup for that email."
-    if time.time() > row["verify_expires"]:
-        conn.close()
-        return False, "That code has expired — request a new one."
-    if not hmac.compare_digest(str(row["verify_code"]), code.strip()):
-        conn.close()
-        return False, "Incorrect code."
-    conn.execute(
-        "UPDATE users SET verified=1, verify_code=NULL, verify_expires=NULL WHERE email=?",
-        (email.lower(),),
-    )
-    conn.commit()
-    conn.close()
-    return True, "Email verified — you can log in now."
-
-
-def authenticate(identifier: str, password: str):
-    """identifier = username or email. Returns (user_dict_or_None, message)."""
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT * FROM users WHERE username=? OR email=?", (identifier, identifier.lower())
+        "SELECT * FROM users WHERE username_lower=?", (username.lower(),)
     ).fetchone()
     conn.close()
     if row is None:
-        return None, "No account with that username/email."
+        return None, "No account with that username."
     if not check_password(password, row["pw_salt"], row["pw_hash"]):
         return None, "Incorrect password."
-    if not row["verified"]:
-        return None, "Please verify your email before logging in."
     return dict(row), ""
 
 
@@ -1199,7 +1088,7 @@ init_db()
 
 
 def render_auth_screen():
-    """Full-page login / signup / verify flow. Returns nothing — sets
+    """Full-page login / signup flow. Returns nothing — sets
     st.session_state['user'] and reruns once authenticated."""
     st.markdown(
         f'<h1 style="color:{C["gold"]}; font-family:Georgia, serif; letter-spacing:0.06em;">Kuṇḍalī</h1>'
@@ -1208,51 +1097,19 @@ def render_auth_screen():
         unsafe_allow_html=True,
     )
 
-    stage = st.session_state.get("auth_stage", "login")
-
-    if stage == "verify":
-        st.markdown('<div class="kcard" style="max-width:440px;"><h4>Verify your email</h4>', unsafe_allow_html=True)
-        pending_email = st.session_state.get("pending_email", "")
-        st.write(f"We sent a 6-digit code to **{pending_email}**.")
-        code = st.text_input("Verification code", max_chars=6, key="verify_code_input")
-        vcol1, vcol2 = st.columns(2)
-        with vcol1:
-            if st.button("Verify", use_container_width=True):
-                ok, msg = verify_code(pending_email, code)
-                if ok:
-                    st.success(msg)
-                    st.session_state["auth_stage"] = "login"
-                    st.session_state.pop("pending_email", None)
-                    st.rerun()
-                else:
-                    st.error(msg)
-        with vcol2:
-            if st.button("Resend code", use_container_width=True):
-                new_code = regenerate_code(pending_email)
-                sent_ok, msg = send_verification_email(pending_email, new_code)
-                (st.info if sent_ok else st.warning)(msg)
-        if st.button("← Back"):
-            st.session_state["auth_stage"] = "login"
-            st.session_state.pop("pending_email", None)
-            st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
-
     tab_login, tab_signup = st.tabs(["Log in", "Sign up"])
 
     with tab_login:
         st.markdown('<div class="kcard" style="max-width:440px;">', unsafe_allow_html=True)
-        identifier = st.text_input("Username or email", key="login_identifier")
+        identifier = st.text_input("Username", key="login_identifier")
         password = st.text_input("Password", type="password", key="login_password")
         if st.button("Log in", use_container_width=True):
             if not identifier or not password:
-                st.error("Enter your username/email and password.")
+                st.error("Enter your username and password.")
             else:
                 user, msg = authenticate(identifier.strip(), password)
                 if user:
-                    st.session_state["user"] = {
-                        "id": user["id"], "username": user["username"], "email": user["email"]
-                    }
+                    st.session_state["user"] = {"id": user["id"], "username": user["username"]}
                     st.rerun()
                 else:
                     st.error(msg)
@@ -1261,7 +1118,6 @@ def render_auth_screen():
     with tab_signup:
         st.markdown('<div class="kcard" style="max-width:440px;">', unsafe_allow_html=True)
         su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
-        su_email = st.text_input("Email", key="su_email")
         su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
         su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
         su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
@@ -1269,9 +1125,8 @@ def render_auth_screen():
             errors = []
             if not USERNAME_RE.match(su_username or ""):
                 errors.append("Username must be 3-20 characters: letters, numbers, underscore only.")
-            email_ok, email_msg = is_allowed_email(su_email or "")
-            if not email_ok:
-                errors.append(email_msg)
+            elif username_taken(su_username):
+                errors.append("That username is already taken — pick another one.")
             if len(su_pw or "") < 8:
                 errors.append("Password must be at least 8 characters.")
             if su_pw != su_pw2:
@@ -1282,15 +1137,11 @@ def render_auth_screen():
                 for e in errors:
                     st.error(e)
             else:
-                ok, code, msg = create_pending_user(su_username.strip(), su_email.strip(), su_pw)
+                ok, msg = create_user(su_username.strip(), su_pw)
                 if not ok:
                     st.error(msg)
                 else:
-                    sent_ok, send_msg = send_verification_email(su_email.strip(), code)
-                    st.session_state["auth_stage"] = "verify"
-                    st.session_state["pending_email"] = su_email.strip().lower()
-                    (st.info if sent_ok else st.warning)(send_msg)
-                    st.rerun()
+                    st.success("Account created — you can log in now.")
         st.markdown("</div>", unsafe_allow_html=True)
 
 
