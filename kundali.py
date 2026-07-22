@@ -1056,6 +1056,11 @@ def init_db():
                 conn.execute("DELETE FROM users WHERE id=?", (extra_id,))
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users(username_lower)")
 
+    # ---- Migration: add is_premium if this DB predates the premium feature.
+    cols_now = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "is_premium" not in cols_now:
+        conn.execute("ALTER TABLE users ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0")
+
     conn.commit()
     conn.close()
 
@@ -1113,6 +1118,20 @@ def authenticate(username: str, password: str):
     if not check_password(password, row["pw_salt"], row["pw_hash"]):
         return None, "Incorrect password."
     return dict(row), ""
+
+
+def is_premium(user_id: int) -> bool:
+    conn = get_conn()
+    row = conn.execute("SELECT is_premium FROM users WHERE id=?", (user_id,)).fetchone()
+    conn.close()
+    return bool(row and row["is_premium"])
+
+
+def set_premium(user_id: int, value: bool = True):
+    conn = get_conn()
+    conn.execute("UPDATE users SET is_premium=? WHERE id=?", (1 if value else 0, user_id))
+    conn.commit()
+    conn.close()
 
 
 def load_profile(user_id: int):
@@ -1201,6 +1220,125 @@ def render_auth_screen():
 
 
 # ============================================================
+# PREMIUM: Kundali report generation (PDF, with HTML fallback)
+# ============================================================
+#
+# PAYMENT — currently a DEMO gate only, no real charge happens anywhere in
+# this file. To go live, replace the button handler inside the "Upgrade to
+# Premium" block below with a real flow, e.g.:
+#   1. Create an order via your gateway's API (Stripe Checkout Session /
+#      Razorpay Orders API) when the button is clicked.
+#   2. Redirect the user to the gateway's hosted checkout page
+#      (st.link_button or a meta-refresh / JS redirect).
+#   3. On return, verify the payment server-side (webhook signature or
+#      redirect-payload signature check) — never trust a client-side flag.
+#   4. Only THEN call set_premium(user_id, True).
+# The set_premium()/is_premium() helpers above are already gateway-agnostic,
+# so nothing else in the app needs to change.
+
+try:
+    from fpdf import FPDF
+    HAS_FPDF = True
+except ImportError:
+    HAS_FPDF = False
+
+
+def _report_data(birth_chart, form):
+    b_asc = next(b for b in birth_chart["bodies"] if b["key"] == "As")
+    b_moon = next(b for b in birth_chart["bodies"] if b["key"] == "Mo")
+    pan = birth_chart["panchanga"]
+    header_lines = [
+        ("Name", form["name"] or "—"),
+        ("Date of birth", form["dob"].strftime("%d %B %Y")),
+        ("Time of birth", form["tob"].strftime("%H:%M:%S")),
+        ("Place", f'{form["city"][0]}, {form["city"][1]}'),
+        ("Ayanamsa", f"{fmt_deg(birth_chart['ayanDate'])} (Lahiri)"),
+        ("Lagna", f"{SIGNS[b_asc['sign']]} {fmt_deg(b_asc['inSign'])}"),
+        ("Moon sign", SIGNS[b_moon["sign"]]),
+        ("Vara", pan["vara"]),
+        ("Tithi", f"{pan['paksha']} {pan['tithiName']}"),
+        ("Nakshatra", f"{NAKSHATRAS[pan['nakIdx']]} - pada {pan['nakPada']}"),
+        ("Yoga", YOGAS[pan["yogaIdx"]]),
+        ("Karana", pan["karana"]),
+    ]
+    body_lines = []
+    for b in birth_chart["bodies"]:
+        retro = " (R)" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
+        body_lines.append((
+            f'{b["key"]} {b["name"]}{retro}',
+            f'{SIGN_ABBR[b["sign"]]} {fmt_dms(b["inSign"])}',
+            f'{NAKSHATRAS[b["nakIdx"]]} pada {b["pada"]}',
+        ))
+    dasha_lines = [
+        (d["lord"], d["from"].strftime("%d %b %Y"), d["to"].strftime("%d %b %Y"))
+        for d in birth_chart["dashas"]
+    ]
+    return header_lines, body_lines, dasha_lines
+
+
+def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
+    header_lines, body_lines, dasha_lines = _report_data(birth_chart, form)
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.cell(0, 12, "Kundali Report", ln=True, align="C")
+    pdf.set_font("Helvetica", "", 11)
+    pdf.ln(2)
+    for k, v in header_lines:
+        pdf.cell(50, 7, k, border=0)
+        pdf.cell(0, 7, str(v), ln=True)
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 8, "Graha Positions", ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    for gname, long_str, nak_str in body_lines:
+        pdf.cell(70, 6, gname, border=0)
+        pdf.cell(50, 6, long_str, border=0)
+        pdf.cell(0, 6, nak_str, ln=True)
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 8, "Vimsottari Mahadasha", ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    for lord, dfrom, dto in dasha_lines:
+        pdf.cell(40, 6, lord, border=0)
+        pdf.cell(0, 6, f"{dfrom} - {dto}", ln=True)
+    out = pdf.output(dest="S")
+    return out.encode("latin-1") if isinstance(out, str) else bytes(out)
+
+
+def generate_kundali_html_report(birth_chart, form) -> str:
+    header_lines, body_lines, dasha_lines = _report_data(birth_chart, form)
+    header_rows = "".join(
+        f"<tr><td style='padding:4px 10px;color:#7A6F5C;'>{k}</td>"
+        f"<td style='padding:4px 10px;'>{v}</td></tr>" for k, v in header_lines
+    )
+    body_rows = "".join(
+        f"<tr><td style='padding:4px 10px;border-bottom:1px solid #eee;'>{a}</td>"
+        f"<td style='padding:4px 10px;border-bottom:1px solid #eee;'>{b}</td>"
+        f"<td style='padding:4px 10px;border-bottom:1px solid #eee;'>{c}</td></tr>"
+        for a, b, c in body_lines
+    )
+    dasha_rows = "".join(
+        f"<tr><td style='padding:4px 10px;'>{l}</td>"
+        f"<td style='padding:4px 10px;'>{f} - {t}</td></tr>"
+        for l, f, t in dasha_lines
+    )
+    return f"""
+    <html><head><meta charset="utf-8"><title>Kundali Report</title></head>
+    <body style="font-family:Georgia, serif; max-width:700px; margin:30px auto; color:#3A2E1F;">
+    <h1 style="color:#B8842E;">Kundali Report</h1>
+    <table style="width:100%;border-collapse:collapse;">{header_rows}</table>
+    <h2 style="color:#B8842E;margin-top:24px;">Graha Positions</h2>
+    <table style="width:100%;border-collapse:collapse;">{body_rows}</table>
+    <h2 style="color:#B8842E;margin-top:24px;">Viṁśottarī Mahādaśā</h2>
+    <table style="width:100%;border-collapse:collapse;">{dasha_rows}</table>
+    <p style="color:#7A6F5C;font-size:12px;margin-top:30px;">Generated by Kuṇḍalī · Lahiri ayanāṁśa engine.</p>
+    </body></html>
+    """
+
+
+# ============================================================
 # STREAMLIT APP
 # ============================================================
 
@@ -1259,7 +1397,8 @@ with topbar_l:
     )
 with topbar_r:
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(f'<p class="kmuted" style="text-align:right;">Signed in as <b>{st.session_state["user"]["username"]}</b></p>', unsafe_allow_html=True)
+    premium_badge = " · ⭐ Premium" if is_premium(st.session_state["user"]["id"]) else ""
+    st.markdown(f'<p class="kmuted" style="text-align:right;">Signed in as <b>{st.session_state["user"]["username"]}</b>{premium_badge}</p>', unsafe_allow_html=True)
     if st.button("Log out", use_container_width=True):
         del st.session_state["user"]
         st.session_state.pop("form", None)
@@ -1448,6 +1587,61 @@ with c2:
         f'<div style="display:flex;justify-content:center;">{svg_circular}</div>', height=760
     )
     st.markdown("</div>", unsafe_allow_html=True)
+
+# ---- Premium: paid Kundali report (PDF, with HTML fallback) ---------------
+user_id = st.session_state["user"]["id"]
+st.markdown(f'<div class="kcard" style="border:2px solid {C["gold"]};">', unsafe_allow_html=True)
+if is_premium(user_id):
+    st.markdown(
+        '<h4>⭐ Premium — Your Kundali Report</h4>'
+        '<p class="kmuted">You have premium access. Download your full report: birth details, '
+        'Pañcāṅga, graha positions, and the Viṁśottarī daśā timeline.</p>',
+        unsafe_allow_html=True,
+    )
+    if HAS_FPDF:
+        pdf_bytes = generate_kundali_pdf_bytes(birth_chart, form)
+        st.download_button(
+            "📄 Download Kundali PDF", data=pdf_bytes,
+            file_name=f"kundali_{form['city'][0]}_{form['dob'].isoformat()}.pdf",
+            mime="application/pdf", use_container_width=True,
+        )
+    else:
+        st.info("Install `fpdf2` (`pip install fpdf2`) to enable PDF export. "
+                "Meanwhile, here's an HTML report you can save or print to PDF from your browser.")
+        html_report = generate_kundali_html_report(birth_chart, form)
+        st.download_button(
+            "📄 Download Kundali Report (HTML)", data=html_report,
+            file_name=f"kundali_{form['city'][0]}_{form['dob'].isoformat()}.html",
+            mime="text/html", use_container_width=True,
+        )
+else:
+    st.markdown(
+        '<h4>⭐ Go Premium — Get Your Kundali Report</h4>'
+        '<p class="kmuted">Unlock a downloadable Kundali report (birth details, graha positions, '
+        'and Viṁśottarī daśā timeline) for a one-time payment.</p>',
+        unsafe_allow_html=True,
+    )
+    pcol1, pcol2 = st.columns([1, 1])
+    with pcol1:
+        st.markdown(
+            f'<p style="font-size:28px;font-weight:700;color:{C["gold"]};margin-bottom:0;">₹299</p>'
+            f'<p class="kmuted" style="margin-top:0;">one-time · lifetime access to report downloads</p>',
+            unsafe_allow_html=True,
+        )
+    with pcol2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Upgrade to Premium", use_container_width=True):
+            # -----------------------------------------------------------
+            # DEMO PAYMENT — see the module docstring above HAS_FPDF for how
+            # to replace this with a real Stripe/Razorpay checkout + webhook
+            # verification before calling set_premium(). No real charge
+            # happens here; this immediately marks the account premium.
+            # -----------------------------------------------------------
+            set_premium(user_id, True)
+            st.success("Payment simulated — premium unlocked! (Wire up a real payment gateway before launch.)")
+            st.rerun()
+    st.caption("⚠️ Demo payment flow — no real charge occurs yet. Swap in Stripe/Razorpay before going live.")
+st.markdown("</div>", unsafe_allow_html=True)
 
 # ---- Row 2: Nakṣatra table + Vimśottarī Mahādaśā + Pañcāṅga -------------
 c4, c5, c6 = st.columns([1, 1, 0.8])
