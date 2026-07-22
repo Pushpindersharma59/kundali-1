@@ -6,8 +6,20 @@ KUNDALI — Vedic birth-chart engine (Python / Streamlit port)
 - Houses fixed to the birth lagna, degrees on every graha
 
 Run with:
-    pip install streamlit pandas
+    pip install streamlit pandas requests fpdf2
     streamlit run kundali_app.py
+
+Razorpay setup (required for real payments):
+    1. Sign up at https://dashboard.razorpay.com/signup
+    2. Complete KYC to go live, or just use Test Mode to develop first
+       (Settings -> API Keys -> Generate Test Key)
+    3. Set these as environment variables (on Render: Dashboard -> your
+       service -> Environment):
+         RAZORPAY_KEY_ID=rzp_test_xxxxxxxx   (or rzp_live_... once verified)
+         RAZORPAY_KEY_SECRET=xxxxxxxxxxxxxxxx
+    4. Also set your Streamlit app's public URL so the checkout redirect
+       comes back to the right place:
+         APP_BASE_URL=https://yourdomain.com
 """
 
 import math
@@ -22,6 +34,7 @@ from datetime import datetime, timedelta, date, time as dtime
 
 import streamlit as st
 import pandas as pd
+import requests
 
 # ============================================================
 # ASTRONOMY ENGINE  (direct port of the JS math, same formulas)
@@ -1061,6 +1074,23 @@ def init_db():
     if "is_premium" not in cols_now:
         conn.execute("ALTER TABLE users ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0")
 
+    # ---- Real-money payments ledger. razorpay_payment_id is UNIQUE so a
+    # payment can only ever be applied once, even if the success redirect
+    # somehow fires twice (double click, page refresh, browser back button).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            razorpay_order_id TEXT NOT NULL,
+            razorpay_payment_id TEXT UNIQUE,
+            amount_paise INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'created',
+            created_at REAL NOT NULL,
+            verified_at REAL,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -1132,6 +1162,59 @@ def set_premium(user_id: int, value: bool = True):
     conn.execute("UPDATE users SET is_premium=? WHERE id=?", (1 if value else 0, user_id))
     conn.commit()
     conn.close()
+
+
+def record_order(user_id: int, order_id: str, amount_paise: int):
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO payments (user_id, razorpay_order_id, amount_paise, status, created_at) "
+        "VALUES (?, ?, ?, 'created', ?)",
+        (user_id, order_id, amount_paise, time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def payment_already_verified(payment_id: str) -> bool:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT 1 FROM payments WHERE razorpay_payment_id=? AND status='paid'", (payment_id,)
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def mark_order_paid(order_id: str, payment_id: str) -> bool:
+    """Attach the payment id to its order and flip it to paid. Returns False if this
+    order was already marked paid or the payment id was already used elsewhere
+    (both cases mean: don't grant premium again)."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, user_id, status FROM payments WHERE razorpay_order_id=?", (order_id,)
+    ).fetchone()
+    if row is None or row["status"] == "paid":
+        conn.close()
+        return False
+    try:
+        conn.execute(
+            "UPDATE payments SET razorpay_payment_id=?, status='paid', verified_at=? WHERE id=?",
+            (payment_id, time.time(), row["id"]),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        # payment_id already attached to a different order — replay attempt
+        conn.close()
+        return False
+    finally:
+        conn.close()
+
+
+def order_owner(order_id: str):
+    conn = get_conn()
+    row = conn.execute("SELECT user_id, amount_paise FROM payments WHERE razorpay_order_id=?", (order_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def load_profile(user_id: int):
@@ -1222,19 +1305,6 @@ def render_auth_screen():
 # ============================================================
 # PREMIUM: Kundali report generation (PDF, with HTML fallback)
 # ============================================================
-#
-# PAYMENT — currently a DEMO gate only, no real charge happens anywhere in
-# this file. To go live, replace the button handler inside the "Upgrade to
-# Premium" block below with a real flow, e.g.:
-#   1. Create an order via your gateway's API (Stripe Checkout Session /
-#      Razorpay Orders API) when the button is clicked.
-#   2. Redirect the user to the gateway's hosted checkout page
-#      (st.link_button or a meta-refresh / JS redirect).
-#   3. On return, verify the payment server-side (webhook signature or
-#      redirect-payload signature check) — never trust a client-side flag.
-#   4. Only THEN call set_premium(user_id, True).
-# The set_premium()/is_premium() helpers above are already gateway-agnostic,
-# so nothing else in the app needs to change.
 
 try:
     from fpdf import FPDF
@@ -1339,6 +1409,129 @@ def generate_kundali_html_report(birth_chart, form) -> str:
 
 
 # ============================================================
+# RAZORPAY — real payments
+# ============================================================
+#
+# Reads credentials from environment variables. On Render: your service ->
+# Environment -> add RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, APP_BASE_URL.
+# Use the rzp_test_... keys first end-to-end before switching to rzp_live_....
+
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "").rstrip("/")
+PREMIUM_PRICE_INR = 299
+PREMIUM_PRICE_PAISE = PREMIUM_PRICE_INR * 100
+
+RAZORPAY_CONFIGURED = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET and APP_BASE_URL)
+
+
+def razorpay_create_order(amount_paise: int, receipt: str) -> dict:
+    """Creates a Razorpay Order server-side (using the secret key, never exposed to
+    the browser). Raises requests.HTTPError on failure."""
+    resp = requests.post(
+        "https://api.razorpay.com/v1/orders",
+        auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
+        json={
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": receipt,
+            "payment_capture": 1,  # auto-capture on successful payment
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def razorpay_verify_signature(order_id: str, payment_id: str, signature: str) -> bool:
+    """Standard Razorpay Checkout signature check: HMAC-SHA256 of
+    'order_id|payment_id' using the account's key secret. This is what proves
+    the success callback actually came from a completed Razorpay payment and
+    wasn't just typed into the URL bar."""
+    msg = f"{order_id}|{payment_id}".encode("utf-8")
+    expected = hmac.new(RAZORPAY_KEY_SECRET.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, username: str):
+    """Opens the Razorpay Checkout modal immediately and, on success, redirects the
+    top-level browser back to this app with the payment proof in the query string
+    so Streamlit can verify it server-side on the next run."""
+    success_url = f"{APP_BASE_URL}/?rzp_order_id={order_id}"
+    st.components.v1.html(
+        f"""
+        <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+        <div id="rzp-status" style="font-family:Georgia, serif; color:#7A6F5C; padding:10px 0;">
+            Opening secure Razorpay checkout…
+        </div>
+        <script>
+        var options = {{
+            "key": "{RAZORPAY_KEY_ID}",
+            "amount": "{amount_paise}",
+            "currency": "INR",
+            "name": "Kuṇḍalī",
+            "description": "Premium Kundali report",
+            "order_id": "{order_id}",
+            "prefill": {{ "name": "{user_name or username}" }},
+            "theme": {{ "color": "#B8842E" }},
+            "handler": function (response) {{
+                var url = "{success_url}"
+                    + "&rzp_payment_id=" + encodeURIComponent(response.razorpay_payment_id)
+                    + "&rzp_signature=" + encodeURIComponent(response.razorpay_signature);
+                window.top.location.href = url;
+            }},
+            "modal": {{
+                "ondismiss": function () {{
+                    document.getElementById("rzp-status").innerText =
+                        "Checkout closed — click 'Upgrade to Premium' again to retry.";
+                }}
+            }}
+        }};
+        var rzp = new Razorpay(options);
+        rzp.on('payment.failed', function (response) {{
+            document.getElementById("rzp-status").innerText =
+                "Payment failed: " + response.error.description;
+        }});
+        rzp.open();
+        </script>
+        """,
+        height=120,
+    )
+
+
+def handle_razorpay_return():
+    """Runs on every rerun, before anything else, so a payment redirect is verified
+    and applied exactly once even if the page is refreshed afterwards."""
+    params = st.query_params
+    order_id = params.get("rzp_order_id")
+    payment_id = params.get("rzp_payment_id")
+    signature = params.get("rzp_signature")
+    if not (order_id and payment_id and signature):
+        return
+    if payment_already_verified(payment_id):
+        st.query_params.clear()
+        return
+    if not razorpay_verify_signature(order_id, payment_id, signature):
+        st.query_params.clear()
+        st.error("Payment verification failed — signature mismatch. If you were charged, "
+                  "contact support with your payment ID: " + payment_id)
+        return
+    owner = order_owner(order_id)
+    if owner is None:
+        st.query_params.clear()
+        st.error("Payment verified but no matching order was found. Contact support with "
+                  "payment ID: " + payment_id)
+        return
+    if mark_order_paid(order_id, payment_id):
+        set_premium(owner["user_id"], True)
+        st.query_params.clear()
+        st.session_state["just_upgraded"] = True
+        st.rerun()
+    else:
+        st.query_params.clear()
+
+
+# ============================================================
 # STREAMLIT APP
 # ============================================================
 
@@ -1387,6 +1580,10 @@ st.markdown(
 if "user" not in st.session_state:
     render_auth_screen()
     st.stop()
+
+handle_razorpay_return()
+if st.session_state.pop("just_upgraded", False):
+    st.success("Payment verified — premium unlocked! 🎉")
 
 topbar_l, topbar_r = st.columns([4, 1])
 with topbar_l:
@@ -1621,26 +1818,43 @@ else:
         'and Viṁśottarī daśā timeline) for a one-time payment.</p>',
         unsafe_allow_html=True,
     )
-    pcol1, pcol2 = st.columns([1, 1])
-    with pcol1:
-        st.markdown(
-            f'<p style="font-size:28px;font-weight:700;color:{C["gold"]};margin-bottom:0;">₹299</p>'
-            f'<p class="kmuted" style="margin-top:0;">one-time · lifetime access to report downloads</p>',
-            unsafe_allow_html=True,
+    if not RAZORPAY_CONFIGURED:
+        st.warning(
+            "Payments aren't configured yet. Set the environment variables "
+            "**RAZORPAY_KEY_ID**, **RAZORPAY_KEY_SECRET**, and **APP_BASE_URL** "
+            "(e.g. `https://yourdomain.com`) in your Render service settings, then redeploy."
         )
-    with pcol2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Upgrade to Premium", use_container_width=True):
-            # -----------------------------------------------------------
-            # DEMO PAYMENT — see the module docstring above HAS_FPDF for how
-            # to replace this with a real Stripe/Razorpay checkout + webhook
-            # verification before calling set_premium(). No real charge
-            # happens here; this immediately marks the account premium.
-            # -----------------------------------------------------------
-            set_premium(user_id, True)
-            st.success("Payment simulated — premium unlocked! (Wire up a real payment gateway before launch.)")
-            st.rerun()
-    st.caption("⚠️ Demo payment flow — no real charge occurs yet. Swap in Stripe/Razorpay before going live.")
+    else:
+        pcol1, pcol2 = st.columns([1, 1])
+        with pcol1:
+            st.markdown(
+                f'<p style="font-size:28px;font-weight:700;color:{C["gold"]};margin-bottom:0;">₹{PREMIUM_PRICE_INR}</p>'
+                f'<p class="kmuted" style="margin-top:0;">one-time · lifetime access to report downloads</p>',
+                unsafe_allow_html=True,
+            )
+        with pcol2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Upgrade to Premium", use_container_width=True, key="start_checkout"):
+                try:
+                    order = razorpay_create_order(
+                        PREMIUM_PRICE_PAISE, receipt=f"user{user_id}-{int(time.time())}"
+                    )
+                    record_order(user_id, order["id"], PREMIUM_PRICE_PAISE)
+                    st.session_state["checkout_order_id"] = order["id"]
+                except requests.HTTPError as e:
+                    st.error(f"Couldn't start checkout — Razorpay rejected the request: {e}")
+                except requests.RequestException as e:
+                    st.error(f"Couldn't reach Razorpay — check your connection and try again. ({e})")
+
+        # If we have a live order in flight, open the actual Razorpay Checkout modal.
+        if st.session_state.get("checkout_order_id"):
+            render_razorpay_checkout(
+                st.session_state["checkout_order_id"],
+                PREMIUM_PRICE_PAISE,
+                form.get("name", ""),
+                st.session_state["user"]["username"],
+            )
+        st.caption("Secured by Razorpay · UPI, cards, netbanking, and wallets accepted.")
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ---- Row 2: Nakṣatra table + Vimśottarī Mahādaśā + Pañcāṅga -------------
