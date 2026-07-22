@@ -982,7 +982,7 @@ def build_circular_svg_chart(birth_bodies, transit_bodies, asc_sign: int, asc_de
 # (case-insensitive), so "PushpinderS" and "pushpinders" are the same account
 # and a second signup with either casing is rejected.
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kundali_users.db")
+DB_PATH = os.path.join(os.environ.get("DB_DIR", os.path.dirname(os.path.abspath(__file__))), "kundali_users.db")
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 
