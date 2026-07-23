@@ -1850,9 +1850,9 @@ def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, u
         rzp.open();
         </script>
         """,
-        height=700,
-        scrolling=True,
+        height=120,
     )
+
 
 def handle_razorpay_return():
     """Runs on every rerun, before anything else, so a payment redirect is verified
