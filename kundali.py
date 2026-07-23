@@ -1424,6 +1424,23 @@ PREMIUM_PRICE_PAISE = PREMIUM_PRICE_INR * 100
 
 RAZORPAY_CONFIGURED = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET and APP_BASE_URL)
 
+# ---- Test mode: lets you exercise the ENTIRE premium flow (order created,
+# payment "completes", the same DB writes a real payment would trigger,
+# premium flag flips, report unlocks) without any real money moving and
+# without needing Razorpay keys at all. Controlled by one environment
+# variable so it can never accidentally stay on in production:
+#   - If RAZORPAY_KEY_ID/SECRET/APP_BASE_URL are NOT all set, test mode
+#     turns on automatically (there's no way to charge a real card anyway).
+#   - Once you add real Razorpay keys on Render, RAZORPAY_CONFIGURED becomes
+#     True and test mode turns itself off automatically.
+#   - PAYMENT_TEST_MODE=1 forces test mode on even with real keys present,
+#     for staging. Never set this on a production deployment that takes
+#     real customer payments.
+PAYMENT_TEST_MODE = (
+    os.environ.get("PAYMENT_TEST_MODE", "").strip().lower() in ("1", "true", "yes")
+    or not RAZORPAY_CONFIGURED
+)
+
 
 def razorpay_create_order(amount_paise: int, receipt: str) -> dict:
     """Creates a Razorpay Order server-side (using the secret key, never exposed to
@@ -1499,6 +1516,21 @@ def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, u
     )
 
 
+def simulate_test_payment(user_id: int, amount_paise: int) -> bool:
+    """Test-mode stand-in for the real Razorpay round trip. Creates a synthetic
+    order + payment id (clearly prefixed 'test_' so they can never collide with
+    or be mistaken for real Razorpay ids), writes them through the exact same
+    payments-ledger functions the real flow uses, then flips is_premium. No
+    network call, no Razorpay checkout, no money movement of any kind."""
+    order_id = f"test_order_{secrets.token_hex(10)}"
+    payment_id = f"test_pay_{secrets.token_hex(10)}"
+    record_order(user_id, order_id, amount_paise)
+    ok = mark_order_paid(order_id, payment_id)
+    if ok:
+        set_premium(user_id, True)
+    return ok
+
+
 def handle_razorpay_return():
     """Runs on every rerun, before anything else, so a payment redirect is verified
     and applied exactly once even if the page is refreshed afterwards."""
@@ -1535,11 +1567,24 @@ def handle_razorpay_return():
 # STREAMLIT APP
 # ============================================================
 
-st.set_page_config(page_title="Kuṇḍalī", page_icon="✨", layout="wide")
+st.set_page_config(
+    page_title="Kuṇḍalī", page_icon="✨", layout="wide",
+    menu_items={"Get Help": None, "Report a bug": None, "About": None},
+)
 
 st.markdown(
     f"""
     <style>
+    /* Hide Streamlit's own chrome for a clean, professional look:
+       main hamburger menu, "Deploy" button, footer, and the
+       "Hosted with Streamlit" badge in the bottom-right corner. */
+    #MainMenu {{ visibility: hidden; }}
+    header[data-testid="stHeader"] {{ visibility: hidden; height: 0; }}
+    footer {{ visibility: hidden; height: 0; }}
+    .stAppDeployButton {{ display: none; }}
+    div[data-testid="stStatusWidget"] {{ visibility: hidden; }}
+    a[href*="streamlit.io"] {{ display: none !important; }}
+
     .stApp {{ background-color: {C["bg"]}; color: {C["ivory"]}; font-size: 17px; }}
     .kcard {{
         background: {C["panel"]}; border: 1px solid {C["line"]};
@@ -1600,6 +1645,16 @@ with topbar_r:
         del st.session_state["user"]
         st.session_state.pop("form", None)
         st.rerun()
+
+if PAYMENT_TEST_MODE:
+    st.markdown(
+        '<div style="background:#FCE8E6;border:1px solid #D93025;border-radius:8px;'
+        'padding:8px 16px;margin-bottom:14px;color:#D93025;font-size:14px;font-weight:600;">'
+        '🧪 TEST MODE — payments are simulated. No real money moves. '
+        'Add real Razorpay keys (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, APP_BASE_URL) to go live.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
 # ---- Load this user's saved birth details, if any, as form defaults -------
 saved_profile = load_profile(st.session_state["user"]["id"])
@@ -1818,22 +1873,27 @@ else:
         'and Viṁśottarī daśā timeline) for a one-time payment.</p>',
         unsafe_allow_html=True,
     )
-    if not RAZORPAY_CONFIGURED:
-        st.warning(
-            "Payments aren't configured yet. Set the environment variables "
-            "**RAZORPAY_KEY_ID**, **RAZORPAY_KEY_SECRET**, and **APP_BASE_URL** "
-            "(e.g. `https://yourdomain.com`) in your Render service settings, then redeploy."
+    pcol1, pcol2 = st.columns([1, 1])
+    with pcol1:
+        st.markdown(
+            f'<p style="font-size:28px;font-weight:700;color:{C["gold"]};margin-bottom:0;">₹{PREMIUM_PRICE_INR}</p>'
+            f'<p class="kmuted" style="margin-top:0;">one-time · lifetime access to report downloads</p>',
+            unsafe_allow_html=True,
         )
-    else:
-        pcol1, pcol2 = st.columns([1, 1])
-        with pcol1:
-            st.markdown(
-                f'<p style="font-size:28px;font-weight:700;color:{C["gold"]};margin-bottom:0;">₹{PREMIUM_PRICE_INR}</p>'
-                f'<p class="kmuted" style="margin-top:0;">one-time · lifetime access to report downloads</p>',
-                unsafe_allow_html=True,
-            )
-        with pcol2:
-            st.markdown("<br>", unsafe_allow_html=True)
+    with pcol2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if PAYMENT_TEST_MODE:
+            # ---- Test-mode path: no Razorpay call, no checkout modal, no real
+            # money. Same downstream effect (premium unlocked) so you can test
+            # the entire report-download flow right now.
+            if st.button("🧪 Simulate Payment (Test Mode)", use_container_width=True, key="simulate_payment"):
+                ok = simulate_test_payment(user_id, PREMIUM_PRICE_PAISE)
+                if ok:
+                    st.session_state["just_upgraded"] = True
+                    st.rerun()
+                else:
+                    st.error("Simulated payment could not be recorded — please try again.")
+        else:
             if st.button("Upgrade to Premium", use_container_width=True, key="start_checkout"):
                 try:
                     order = razorpay_create_order(
@@ -1846,14 +1906,19 @@ else:
                 except requests.RequestException as e:
                     st.error(f"Couldn't reach Razorpay — check your connection and try again. ({e})")
 
-        # If we have a live order in flight, open the actual Razorpay Checkout modal.
-        if st.session_state.get("checkout_order_id"):
-            render_razorpay_checkout(
-                st.session_state["checkout_order_id"],
-                PREMIUM_PRICE_PAISE,
-                form.get("name", ""),
-                st.session_state["user"]["username"],
-            )
+    # If we have a live order in flight, open the actual Razorpay Checkout modal.
+    # (Never reached in test mode, since that path sets is_premium immediately.)
+    if not PAYMENT_TEST_MODE and st.session_state.get("checkout_order_id"):
+        render_razorpay_checkout(
+            st.session_state["checkout_order_id"],
+            PREMIUM_PRICE_PAISE,
+            form.get("name", ""),
+            st.session_state["user"]["username"],
+        )
+    if PAYMENT_TEST_MODE:
+        st.caption("🧪 Test mode active — clicking the button above instantly unlocks premium. "
+                   "No Razorpay, no card, no charge.")
+    else:
         st.caption("Secured by Razorpay · UPI, cards, netbanking, and wallets accepted.")
 st.markdown("</div>", unsafe_allow_html=True)
 
