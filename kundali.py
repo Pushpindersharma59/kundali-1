@@ -1850,7 +1850,8 @@ def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, u
         rzp.open();
         </script>
         """,
-        height=120,
+        height=700,
+        scrolling=true
     )
 
 
