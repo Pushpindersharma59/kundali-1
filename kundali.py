@@ -1312,109 +1312,463 @@ try:
 except ImportError:
     HAS_FPDF = False
 
+# ---- ASCII-safe transliterations for the PDF ------------------------------
+# fpdf2's built-in core fonts (Helvetica etc.) only support Latin-1/WinAnsi,
+# so IAST diacritics (ā, ṛ, ś, ṇ ...) used elsewhere in the app would either
+# raise an encode error or render as garbage. Rather than bundle a Unicode
+# TTF font, the PDF report uses these plain-ASCII equivalents throughout.
 
-def _report_data(birth_chart, form):
-    b_asc = next(b for b in birth_chart["bodies"] if b["key"] == "As")
-    b_moon = next(b for b in birth_chart["bodies"] if b["key"] == "Mo")
-    pan = birth_chart["panchanga"]
-    header_lines = [
-        ("Name", form["name"] or "—"),
-        ("Date of birth", form["dob"].strftime("%d %B %Y")),
-        ("Time of birth", form["tob"].strftime("%H:%M:%S")),
-        ("Place", f'{form["city"][0]}, {form["city"][1]}'),
-        ("Ayanamsa", f"{fmt_deg(birth_chart['ayanDate'])} (Lahiri)"),
-        ("Lagna", f"{SIGNS[b_asc['sign']]} {fmt_deg(b_asc['inSign'])}"),
-        ("Moon sign", SIGNS[b_moon["sign"]]),
-        ("Vara", pan["vara"]),
-        ("Tithi", f"{pan['paksha']} {pan['tithiName']}"),
-        ("Nakshatra", f"{NAKSHATRAS[pan['nakIdx']]} - pada {pan['nakPada']}"),
-        ("Yoga", YOGAS[pan["yogaIdx"]]),
-        ("Karana", pan["karana"]),
-    ]
-    body_lines = []
-    for b in birth_chart["bodies"]:
-        retro = " (R)" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
-        body_lines.append((
-            f'{b["key"]} {b["name"]}{retro}',
-            f'{SIGN_ABBR[b["sign"]]} {fmt_dms(b["inSign"])}',
-            f'{NAKSHATRAS[b["nakIdx"]]} pada {b["pada"]}',
-        ))
-    dasha_lines = [
-        (d["lord"], d["from"].strftime("%d %b %Y"), d["to"].strftime("%d %b %Y"))
-        for d in birth_chart["dashas"]
-    ]
-    return header_lines, body_lines, dasha_lines
+SIGNS_ASCII = ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo", "Libra", "Scorpio",
+               "Sagittarius", "Capricorn", "Aquarius", "Pisces"]
+
+NAKSHATRAS_ASCII = [
+    "Ashwini", "Bharani", "Krittika", "Rohini", "Mrigashira", "Ardra", "Punarvasu",
+    "Pushya", "Ashlesha", "Magha", "Purva Phalguni", "Uttara Phalguni", "Hasta",
+    "Chitra", "Swati", "Vishakha", "Anuradha", "Jyeshtha", "Mula", "Purva Ashadha",
+    "Uttara Ashadha", "Shravana", "Dhanishtha", "Shatabhisha", "Purva Bhadrapada",
+    "Uttara Bhadrapada", "Revati",
+]
+
+NAK_ABBR_ASCII = ["Aswi", "Bhar", "Krit", "Rohi", "Mrig", "Ardr", "Puna", "Push", "Asle",
+                  "Magh", "PPha", "UPha", "Hast", "Chit", "Swat", "Visa", "Anur", "Jyes",
+                  "Mula", "PAsh", "UAsh", "Shra", "Dhan", "Shat", "PBha", "UBha", "Reva"]
+
+TITHIS_ASCII = ["Pratipada", "Dvitiya", "Tritiya", "Chaturthi", "Panchami", "Shashthi",
+                "Saptami", "Ashtami", "Navami", "Dashami", "Ekadashi", "Dwadashi",
+                "Trayodashi", "Chaturdashi"]
+
+YOGAS_ASCII = ["Vishkambha", "Priti", "Ayushman", "Saubhagya", "Shobhana", "Atiganda",
+               "Sukarma", "Dhriti", "Shula", "Ganda", "Vriddhi", "Dhruva", "Vyaghata",
+               "Harshana", "Vajra", "Siddhi", "Vyatipata", "Variyan", "Parigha", "Shiva",
+               "Siddha", "Sadhya", "Shubha", "Shukla", "Brahma", "Indra", "Vaidhriti"]
+
+KARANA_ASCII_MAP = {
+    "Kiṁstughna": "Kimstughna", "Bava": "Bava", "Bālava": "Balava", "Kaulava": "Kaulava",
+    "Taitila": "Taitila", "Gara": "Gara", "Vaṇija": "Vanija", "Viṣṭi": "Vishti",
+    "Śakuni": "Shakuni", "Catuṣpāda": "Chatushpada", "Nāga": "Naga",
+}
+
+DASHA_LORDS_ASCII = ["Ketu", "Venus", "Sun", "Moon", "Mars", "Rahu", "Jupiter", "Saturn", "Mercury"]
+
+BODY_FULLNAME_ASCII = {
+    "As": "Ascendant (Lagna)", "Su": "Sun", "Mo": "Moon", "Ma": "Mars", "Me": "Mercury",
+    "Jp": "Jupiter", "Ve": "Venus", "Sa": "Saturn", "Ra": "Rahu", "Ke": "Ketu",
+    "HL": "Hora Lagna", "BL": "Bhava Lagna", "GL": "Ghatika Lagna",
+    "\u015aL": "Sri Lagna", "PP": "Pranapada Lagna", "ViL": "Vighatika Lagna",
+}
+
+
+def _fmt_deg_ascii(x: float) -> str:
+    """Same as fmt_deg but uses a plain apostrophe instead of the prime (′)
+    symbol, which isn't in Latin-1 and would break fpdf2's core fonts."""
+    d = math.floor(x)
+    m = math.floor((x - d) * 60)
+    return f"{d}\u00b0{m:02d}'"
+
+
+def _ascii_key(key: str) -> str:
+    return "SL" if key == "\u015aL" else key
+
+
+def _tithi_ascii(pan: dict) -> tuple:
+    idx = pan["tithiIdx"]
+    paksha = "Shukla" if idx < 15 else "Krishna"
+    if idx == 14:
+        name = "Purnima"
+    elif idx == 29:
+        name = "Amavasya"
+    else:
+        name = TITHIS_ASCII[idx % 15]
+    return paksha, name
+
+
+# Fractional (x, y) center of each house within the diamond chart's bounding
+# square, in the same North-Indian layout as the on-screen SVG chart.
+HOUSE_FRACS = [
+    (0.5, 0.25), (0.25, 0.125), (0.125, 0.25), (0.255, 0.5),
+    (0.125, 0.75), (0.25, 0.875), (0.5, 0.7425), (0.75, 0.875),
+    (0.875, 0.75), (0.745, 0.5), (0.875, 0.25), (0.75, 0.125),
+]
+
+
+def draw_diamond_chart_pdf(pdf, bodies, asc_sign: int, asc_body: dict, x0: float, y0: float, size: float):
+    """Draws a real North-Indian diamond Rasi chart directly with fpdf2's vector
+    primitives (no external image/rasterizer needed)."""
+    x1, y1 = x0 + size, y0 + size
+    midx, midy = x0 + size / 2, y0 + size / 2
+
+    pdf.set_draw_color(184, 132, 46)
+    pdf.set_line_width(0.5)
+    pdf.rect(x0, y0, size, size)
+    pdf.line(x0, y0, x1, y1)
+    pdf.line(x1, y0, x0, y1)
+    pdf.set_line_width(0.35)
+    pdf.line(midx, y0, x1, midy)
+    pdf.line(x1, midy, midx, y1)
+    pdf.line(midx, y1, x0, midy)
+    pdf.line(x0, midy, midx, y0)
+
+    by_house = [[] for _ in range(12)]
+    for b in bodies:
+        if b["key"] == "As":
+            continue
+        by_house[(b["sign"] - asc_sign + 12) % 12].append(b)
+
+    for h, (fx, fy) in enumerate(HOUSE_FRACS):
+        cx, cy = x0 + fx * size, y0 + fy * size
+        sign_num = ((asc_sign + h) % 12) + 1
+        lines = []
+        if h == 0:
+            lines.append(f'As {int(asc_body["inSign"])}\u00b0')
+        for b in by_house[h]:
+            deg = int(b["inSign"])
+            retro = "R" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
+            lines.append(f'{_ascii_key(b["key"])} {deg}\u00b0{retro}')
+
+        block_h = len(lines) * 4.2
+        pdf.set_font("Helvetica", "", 7)
+        pdf.set_text_color(122, 111, 92)
+        pdf.text(cx - 3, cy - block_h / 2 - 3, str(sign_num))
+
+        ty = cy - block_h / 2
+        for line in lines:
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_text_color(196, 70, 43) if (line.startswith("As ")) else pdf.set_text_color(58, 46, 31)
+            pdf.set_xy(cx - 16, ty)
+            pdf.cell(32, 4.2, line, align="C")
+            ty += 4.2
 
 
 def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
-    header_lines, body_lines, dasha_lines = _report_data(birth_chart, form)
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    GOLD, IVORY, SINDOOR, MUTED = (184, 132, 46), (58, 46, 31), (196, 70, 43), (122, 111, 92)
+    LINE, PANEL_SOFT, WHITE = (222, 196, 120), (255, 243, 176), (255, 253, 231)
+
+    b_asc = next(b for b in birth_chart["bodies"] if b["key"] == "As")
+    b_moon = next(b for b in birth_chart["bodies"] if b["key"] == "Mo")
+    pan = birth_chart["panchanga"]
+    core_bodies = [b for b in birth_chart["bodies"] if b["key"] in CORE_KEYS]
+    paksha_ascii, tithi_ascii = _tithi_ascii(pan)
+    karana_ascii = KARANA_ASCII_MAP.get(pan["karana"], pan["karana"])
+
+    pdf = FPDF(format="A4", unit="mm")
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.set_margins(15, 15, 15)
+    pdf.set_title("Kundali Report")
+
+    def banner(title, subtitle=""):
+        pdf.set_fill_color(*GOLD)
+        pdf.rect(0, 0, 210, 26, "F")
+        pdf.set_xy(0, 6)
+        pdf.set_text_color(*WHITE)
+        pdf.set_font("Helvetica", "B", 20)
+        pdf.cell(210, 10, title, align="C")
+        if subtitle:
+            pdf.set_xy(0, 17)
+            pdf.set_font("Helvetica", "", 10)
+            pdf.cell(210, 6, subtitle, align="C")
+        pdf.set_y(32)
+        pdf.set_text_color(*IVORY)
+
+    def section(text):
+        pdf.ln(3)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_text_color(*GOLD)
+        pdf.cell(0, 8, text, ln=True)
+        y = pdf.get_y()
+        pdf.set_draw_color(*LINE)
+        pdf.set_line_width(0.4)
+        pdf.line(15, y, 195, y)
+        pdf.ln(2)
+        pdf.set_text_color(*IVORY)
+
+    def kv_row(k, v):
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(*MUTED)
+        pdf.cell(55, 6.5, k)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*IVORY)
+        pdf.cell(0, 6.5, str(v), ln=True)
+
+    def table(headers, rows, widths, row_h=6.5):
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_fill_color(*GOLD)
+        pdf.set_text_color(*WHITE)
+        for h, w in zip(headers, widths):
+            pdf.cell(w, 7, h, border=0, fill=True, align="C")
+        pdf.ln(7)
+        pdf.set_font("Helvetica", "", 8.5)
+        for i, row in enumerate(rows):
+            if pdf.get_y() + row_h > 279:
+                pdf.add_page()
+                pdf.set_font("Helvetica", "B", 9)
+                pdf.set_fill_color(*GOLD)
+                pdf.set_text_color(*WHITE)
+                for h, w in zip(headers, widths):
+                    pdf.cell(w, 7, h, border=0, fill=True, align="C")
+                pdf.ln(7)
+                pdf.set_font("Helvetica", "", 8.5)
+            pdf.set_fill_color(*(PANEL_SOFT if i % 2 == 0 else WHITE))
+            pdf.set_text_color(*IVORY)
+            for cell_val, w in zip(row, widths):
+                pdf.cell(w, row_h, str(cell_val), border=0, fill=True, align="C")
+            pdf.ln(row_h)
+
+    # ---------------- Page 1: cover, birth details, Rasi chart ----------------
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 12, "Kundali Report", ln=True, align="C")
-    pdf.set_font("Helvetica", "", 11)
+    banner("KUNDALI", "Vedic Birth Chart Report")
+    section("Birth Details")
+    kv_row("Name", form["name"] or "-")
+    kv_row("Date of Birth", form["dob"].strftime("%d %B %Y"))
+    kv_row("Time of Birth", form["tob"].strftime("%H:%M:%S"))
+    kv_row("Place of Birth", f'{form["city"][0]}, {form["city"][1]}')
+    kv_row("Ayanamsa", f"{_fmt_deg_ascii(birth_chart['ayanDate'])} (Lahiri)")
+    kv_row("Lagna (Ascendant)", f"{SIGNS_ASCII[b_asc['sign']]}  {_fmt_deg_ascii(b_asc['inSign'])}")
+    kv_row("Moon Sign (Rasi)", SIGNS_ASCII[b_moon["sign"]])
+    kv_row("Birth Nakshatra", f"{NAKSHATRAS_ASCII[pan['nakIdx']]}  -  Pada {pan['nakPada']}")
+
+    section("Rasi Chart (D1) - North Indian Style")
+    chart_size = 130
+    x0 = (210 - chart_size) / 2
+    y0 = pdf.get_y() + 2
+    draw_diamond_chart_pdf(pdf, core_bodies, b_asc["sign"], b_asc, x0, y0, chart_size)
+    pdf.set_y(y0 + chart_size + 5)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(*MUTED)
+    pdf.cell(0, 5, "Houses are fixed to the birth lagna. R = retrograde.", ln=True, align="C")
+
+    # ---------------- Page 2: Panchanga + Chara Karaka ----------------
+    pdf.add_page()
+    banner("PANCHANGA", "Five Limbs of the Almanac, at the Moment of Birth")
+    section("Panchanga at Birth")
+    kv_row("Vara (Weekday)", form["dob"].strftime("%A"))
+    kv_row("Tithi (Lunar Day)", f"{paksha_ascii} Paksha, {tithi_ascii}  ({pan['tithiPct']:.1f}% elapsed)")
+    kv_row("Nakshatra", f"{NAKSHATRAS_ASCII[pan['nakIdx']]}  -  Pada {pan['nakPada']}")
+    kv_row("Yoga", YOGAS_ASCII[pan["yogaIdx"]])
+    kv_row("Karana", karana_ascii)
+
+    section("Chara Karaka (Significators)")
+    karaka_rows = []
+    karaka_order = ["AK", "AmK", "BK", "MK", "PiK", "PK", "GK", "DK"]
+    karaka_names = {
+        "AK": "Atmakaraka (self)", "AmK": "Amatyakaraka (career)", "BK": "Bhratrukaraka (siblings)",
+        "MK": "Matrukaraka (mother)", "PiK": "Pitrukaraka (father)", "PK": "Putrakaraka (children)",
+        "GK": "Gnatikaraka (relatives)", "DK": "Darakaraka (spouse)",
+    }
+    karaka_lookup = {b["karaka"]: b for b in core_bodies if b.get("karaka")}
+    for code in karaka_order:
+        b = karaka_lookup.get(code)
+        if b:
+            karaka_rows.append((code, karaka_names[code], BODY_FULLNAME_ASCII.get(b["key"], b["key"])))
+    table(["Code", "Significance", "Graha"], karaka_rows, [22, 100, 56])
+
+    # ---------------- Page 3: Graha positions ----------------
+    pdf.add_page()
+    banner("GRAHA POSITIONS", "Planetary Longitudes and Nakshatras")
+    section("All Grahas & Special Lagnas")
+    graha_rows = []
+    for b in birth_chart["bodies"]:
+        retro = "R" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
+        combust = "C" if b.get("combust") else ""
+        flags = " ".join(f for f in (retro, combust) if f) or "-"
+        graha_rows.append((
+            BODY_FULLNAME_ASCII.get(b["key"], b["key"]),
+            f'{SIGNS_ASCII[b["sign"]]} {_fmt_deg_ascii(b["inSign"])}',
+            f'{NAKSHATRAS_ASCII[b["nakIdx"]]} P{b["pada"]}',
+            b.get("karaka") or "-",
+            flags,
+        ))
+    table(["Graha", "Sign & Degree", "Nakshatra", "Karaka", "Flags"],
+          graha_rows, [48, 42, 52, 22, 16], row_h=6.5)
     pdf.ln(2)
-    for k, v in header_lines:
-        pdf.cell(50, 7, k, border=0)
-        pdf.cell(0, 7, str(v), ln=True)
-    pdf.ln(4)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 8, "Graha Positions", ln=True)
-    pdf.set_font("Helvetica", "", 10)
-    for gname, long_str, nak_str in body_lines:
-        pdf.cell(70, 6, gname, border=0)
-        pdf.cell(50, 6, long_str, border=0)
-        pdf.cell(0, 6, nak_str, ln=True)
-    pdf.ln(4)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 8, "Vimsottari Mahadasha", ln=True)
-    pdf.set_font("Helvetica", "", 10)
-    for lord, dfrom, dto in dasha_lines:
-        pdf.cell(40, 6, lord, border=0)
-        pdf.cell(0, 6, f"{dfrom} - {dto}", ln=True)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(*MUTED)
+    pdf.cell(0, 5, "R = retrograde, C = combust (within orb of the Sun). "
+                    "HL/BL/GL/SL/PP/ViL are special lagnas from Ishta Kala.", ln=True)
+
+    # ---------------- Page 4: Vimsottari Mahadasha ----------------
+    pdf.add_page()
+    banner("VIMSOTTARI DASHA", "120-Year Planetary Period Timeline")
+    section(f"Mahadasha Sequence  -  Starting Lord: {DASHA_LORDS_ASCII[birth_chart['dashas'][0]['lordIdx']]}")
+    now_utc_ = datetime.utcnow()
+    dasha_rows = []
+    for d in birth_chart["dashas"]:
+        active = "* current" if d["from"] <= now_utc_ < d["to"] else ""
+        dasha_rows.append((
+            DASHA_LORDS_ASCII[d["lordIdx"]],
+            d["from"].strftime("%d %b %Y"),
+            d["to"].strftime("%d %b %Y"),
+            f'{d["yrs"]:.1f} yrs',
+            active,
+        ))
+    table(["Lord", "From", "To", "Duration", ""], dasha_rows, [40, 40, 40, 30, 30], row_h=7)
+
+    pdf.ln(6)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(*MUTED)
+    pdf.multi_cell(0, 4.5,
+        "Engine accuracy: Sun/Moon within a few arc-minutes, other grahas within roughly "
+        "0.1-0.5 degrees, mean node (Rahu/Ketu). Generated by the Kundali app - Lahiri "
+        "ayanamsa. For high-stakes decisions, cross-check against a Swiss-Ephemeris-based tool.")
+
     out = pdf.output(dest="S")
     return out.encode("latin-1") if isinstance(out, str) else bytes(out)
 
 
 def generate_kundali_html_report(birth_chart, form) -> str:
-    header_lines, body_lines, dasha_lines = _report_data(birth_chart, form)
+    b_asc = next(b for b in birth_chart["bodies"] if b["key"] == "As")
+    b_moon = next(b for b in birth_chart["bodies"] if b["key"] == "Mo")
+    pan = birth_chart["panchanga"]
+    core_bodies = [b for b in birth_chart["bodies"] if b["key"] in CORE_KEYS]
+
+    header_pairs = [
+        ("Name", form["name"] or "—"),
+        ("Date of birth", form["dob"].strftime("%d %B %Y")),
+        ("Time of birth", form["tob"].strftime("%H:%M:%S")),
+        ("Place", f'{form["city"][0]}, {form["city"][1]}'),
+        ("Ayanāṁśa", f"{fmt_deg(birth_chart['ayanDate'])} (Lahiri)"),
+        ("Lagna", f"{SIGNS[b_asc['sign']]} {fmt_deg(b_asc['inSign'])}"),
+        ("Moon sign", SIGNS[b_moon["sign"]]),
+        ("Nakṣatra", f"{NAKSHATRAS[pan['nakIdx']]} · pada {pan['nakPada']}"),
+        ("Vāra", pan["vara"]),
+        ("Tithi", f"{pan['paksha']} {pan['tithiName']} · {pan['tithiPct']:.1f}%"),
+        ("Yoga", YOGAS[pan["yogaIdx"]]),
+        ("Karaṇa", pan["karana"]),
+    ]
     header_rows = "".join(
-        f"<tr><td style='padding:4px 10px;color:#7A6F5C;'>{k}</td>"
-        f"<td style='padding:4px 10px;'>{v}</td></tr>" for k, v in header_lines
+        f"<tr><td class='k'>{k}</td><td class='v'>{v}</td></tr>" for k, v in header_pairs
     )
-    body_rows = "".join(
-        f"<tr><td style='padding:4px 10px;border-bottom:1px solid #eee;'>{a}</td>"
-        f"<td style='padding:4px 10px;border-bottom:1px solid #eee;'>{b}</td>"
-        f"<td style='padding:4px 10px;border-bottom:1px solid #eee;'>{c}</td></tr>"
-        for a, b, c in body_lines
+
+    graha_rows = "".join(
+        f"<tr><td class='key'>{b['key']}</td><td>{b['name']}"
+        f"{' <span class=\"retro\">℞</span>' if (b['retro'] and b['key'] not in ('Ra','Ke')) else ''}"
+        f"{' <span class=\"combust\">🔥</span>' if b.get('combust') else ''}</td>"
+        f"<td>{SIGN_ABBR[b['sign']]} {fmt_dms(b['inSign'])}</td>"
+        f"<td>{NAKSHATRAS[b['nakIdx']]} P{b['pada']}</td>"
+        f"<td>{b.get('karaka') or '—'}</td></tr>"
+        for b in birth_chart["bodies"]
     )
+
+    now_utc_ = datetime.utcnow()
     dasha_rows = "".join(
-        f"<tr><td style='padding:4px 10px;'>{l}</td>"
-        f"<td style='padding:4px 10px;'>{f} - {t}</td></tr>"
-        for l, f, t in dasha_lines
+        f"<tr class=\"{'active' if d['from'] <= now_utc_ < d['to'] else ''}\">"
+        f"<td>{d['lord']}</td><td>{d['from'].strftime('%d %b %Y')}</td>"
+        f"<td>{d['to'].strftime('%d %b %Y')}</td><td>{d['yrs']:.1f} yrs</td></tr>"
+        for d in birth_chart["dashas"]
     )
-    return f"""
-    <html><head><meta charset="utf-8"><title>Kundali Report</title></head>
-    <body style="font-family:Georgia, serif; max-width:700px; margin:30px auto; color:#3A2E1F;">
-    <h1 style="color:#B8842E;">Kundali Report</h1>
-    <table style="width:100%;border-collapse:collapse;">{header_rows}</table>
-    <h2 style="color:#B8842E;margin-top:24px;">Graha Positions</h2>
-    <table style="width:100%;border-collapse:collapse;">{body_rows}</table>
-    <h2 style="color:#B8842E;margin-top:24px;">Viṁśottarī Mahādaśā</h2>
-    <table style="width:100%;border-collapse:collapse;">{dasha_rows}</table>
-    <p style="color:#7A6F5C;font-size:12px;margin-top:30px;">Generated by Kuṇḍalī · Lahiri ayanāṁśa engine.</p>
-    </body></html>
+
+    # ---- CSS-only diamond (North-Indian) chart: 12 absolutely-positioned
+    # house cells inside a rotated-square backdrop, matching the on-screen chart.
+    by_house = [[] for _ in range(12)]
+    for b in core_bodies:
+        if b["key"] == "As":
+            continue
+        by_house[(b["sign"] - b_asc["sign"] + 12) % 12].append(b)
+    house_positions = [
+        (50, 15), (25, 7.5), (12.5, 25), (23, 50), (12.5, 75), (25, 92.5),
+        (50, 74), (75, 92.5), (87.5, 75), (74, 50), (87.5, 25), (75, 7.5),
+    ]
+    house_cells = []
+    for h, (left, top) in enumerate(house_positions):
+        sign_num = ((b_asc["sign"] + h) % 12) + 1
+        lines = [f'<div class="hnum">{sign_num}</div>']
+        if h == 0:
+            lines.append(f'<div class="asc">As {int(b_asc["inSign"])}°</div>')
+        for b in by_house[h]:
+            retro = "℞" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
+            lines.append(f'<div class="pl">{b["key"]} {int(b["inSign"])}°{retro}</div>')
+        house_cells.append(
+            f'<div class="house" style="left:{left}%;top:{top}%;">{"".join(lines)}</div>'
+        )
+    chart_html = f"""
+    <div class="chartwrap">
+      <div class="diamond"></div>
+      {"".join(house_cells)}
+    </div>
     """
+
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Kundali Report</title>
+<style>
+  body {{ font-family: Georgia, serif; max-width: 760px; margin: 0 auto; padding: 30px 24px 50px;
+          color: #3A2E1F; background: #FFFDF3; }}
+  .banner {{ background: #B8842E; color: #FFFDE7; padding: 18px 24px; border-radius: 10px;
+             text-align: center; margin-bottom: 22px; }}
+  .banner h1 {{ margin: 0; letter-spacing: 0.05em; }}
+  .banner p {{ margin: 4px 0 0; font-size: 13px; opacity: 0.9; }}
+  h2 {{ color: #B8842E; border-bottom: 2px solid #F0DE94; padding-bottom: 6px; margin-top: 34px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
+  td {{ padding: 6px 10px; border-bottom: 1px solid #eee; }}
+  td.k {{ color: #7A6F5C; width: 40%; }}
+  td.v {{ font-weight: 600; }}
+  tr:nth-child(even) td {{ background: #FFF9E2; }}
+  tr.active td {{ background: #FFF3B0; font-weight: 700; }}
+  .retro {{ color: #C4462B; font-size: 12px; }}
+  .combust {{ font-size: 12px; }}
+  .footer {{ color: #7A6F5C; font-size: 12px; margin-top: 30px; text-align: center; }}
+  .chartwrap {{ position: relative; width: 420px; height: 420px; margin: 20px auto; }}
+  .diamond {{ position: absolute; inset: 0; border: 2px solid #B8842E; border-radius: 4px;
+              background:
+                linear-gradient(135deg, transparent calc(50% - 0.75px), #B8842E calc(50% - 0.75px), #B8842E calc(50% + 0.75px), transparent calc(50% + 0.75px)),
+                linear-gradient(45deg, transparent calc(50% - 0.75px), #B8842E calc(50% - 0.75px), #B8842E calc(50% + 0.75px), transparent calc(50% + 0.75px)),
+                linear-gradient(#FFFDE7, #FFF3B0); }}
+  .house {{ position: absolute; transform: translate(-50%, -50%); text-align: center;
+            font-size: 11px; width: 90px; }}
+  .hnum {{ color: #7A6F5C; font-size: 10px; }}
+  .asc {{ color: #3A5B8C; font-weight: 700; }}
+  .pl {{ font-weight: 700; }}
+</style>
+</head>
+<body>
+  <div class="banner">
+    <h1>Kuṇḍalī</h1>
+    <p>Vedic Birth Chart Report · Lahiri Ayanāṁśa</p>
+  </div>
+
+  <h2>Birth Details</h2>
+  <table>{header_rows}</table>
+
+  <h2>Rāśi Chart (D1) · North Indian Style</h2>
+  {chart_html}
+
+  <h2>Graha Positions</h2>
+  <table>
+    <tr><th>Graha</th><th>Name</th><th>Sign &amp; Degree</th><th>Nakṣatra</th><th>Kāraka</th></tr>
+    {graha_rows}
+  </table>
+
+  <h2>Viṁśottarī Mahādaśā</h2>
+  <table>
+    <tr><th>Lord</th><th>From</th><th>To</th><th>Duration</th></tr>
+    {dasha_rows}
+  </table>
+
+  <p class="footer">Generated by Kuṇḍalī · Lahiri ayanāṁśa engine · houses fixed to the birth lagna.<br>
+  Engine accuracy: Sun/Moon within a few arc-minutes, other grahas ~0.1–0.5°, mean node.</p>
+</body></html>
+"""
 
 
 # ============================================================
-# RAZORPAY — real payments
+# RAZORPAY — real payments (Test Mode by default, safe to try)
 # ============================================================
 #
 # Reads credentials from environment variables. On Render: your service ->
 # Environment -> add RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, APP_BASE_URL.
-# Use the rzp_test_... keys first end-to-end before switching to rzp_live_....
+#
+# TESTING (no real money moves, but every step is the real integration):
+#   1. Dashboard -> toggle "Test Mode" (top-left) -> Settings -> API Keys
+#      -> Generate Test Key. Copy the Key Id (rzp_test_...) and Key Secret.
+#   2. Set RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET to those TEST values, and
+#      APP_BASE_URL to this app's public URL (e.g. https://yourapp.onrender.com).
+#   3. Click "Upgrade to Premium" in the app, then in the Razorpay checkout
+#      modal pay with the official test card: 4111 1111 1111 1111, any
+#      future expiry, any CVV, then any 4-10 digit OTP to succeed (a <4
+#      digit OTP simulates a decline). For UPI, use the VPA "success@razorpay"
+#      to simulate success or "failure@razorpay" to simulate a decline.
+#   4. Check the Razorpay Dashboard -> Transactions (still in Test Mode) to
+#      see the test payment land there in real time.
+#   5. When ready for real money, swap in the rzp_live_... keys — nothing
+#      else in this file needs to change.
 
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
@@ -1423,23 +1777,7 @@ PREMIUM_PRICE_INR = 299
 PREMIUM_PRICE_PAISE = PREMIUM_PRICE_INR * 100
 
 RAZORPAY_CONFIGURED = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET and APP_BASE_URL)
-
-# ---- Test mode: lets you exercise the ENTIRE premium flow (order created,
-# payment "completes", the same DB writes a real payment would trigger,
-# premium flag flips, report unlocks) without any real money moving and
-# without needing Razorpay keys at all. Controlled by one environment
-# variable so it can never accidentally stay on in production:
-#   - If RAZORPAY_KEY_ID/SECRET/APP_BASE_URL are NOT all set, test mode
-#     turns on automatically (there's no way to charge a real card anyway).
-#   - Once you add real Razorpay keys on Render, RAZORPAY_CONFIGURED becomes
-#     True and test mode turns itself off automatically.
-#   - PAYMENT_TEST_MODE=1 forces test mode on even with real keys present,
-#     for staging. Never set this on a production deployment that takes
-#     real customer payments.
-PAYMENT_TEST_MODE = (
-    os.environ.get("PAYMENT_TEST_MODE", "").strip().lower() in ("1", "true", "yes")
-    or not RAZORPAY_CONFIGURED
-)
+RAZORPAY_TEST_MODE = RAZORPAY_KEY_ID.startswith("rzp_test_")
 
 
 def razorpay_create_order(amount_paise: int, receipt: str) -> dict:
@@ -1500,7 +1838,7 @@ def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, u
             "modal": {{
                 "ondismiss": function () {{
                     document.getElementById("rzp-status").innerText =
-                        "Checkout closed — click 'Upgrade to Premium' again to retry.";
+                        "Checkout closed — click 'Reopen payment window' below to retry.";
                 }}
             }}
         }};
@@ -1511,29 +1849,18 @@ def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, u
         }});
         rzp.open();
         </script>
-     """,
-        height=700,
-        scrolling=True,
+        """,
+        height=120,
     )
-
-def simulate_test_payment(user_id: int, amount_paise: int) -> bool:
-    """Test-mode stand-in for the real Razorpay round trip. Creates a synthetic
-    order + payment id (clearly prefixed 'test_' so they can never collide with
-    or be mistaken for real Razorpay ids), writes them through the exact same
-    payments-ledger functions the real flow uses, then flips is_premium. No
-    network call, no Razorpay checkout, no money movement of any kind."""
-    order_id = f"test_order_{secrets.token_hex(10)}"
-    payment_id = f"test_pay_{secrets.token_hex(10)}"
-    record_order(user_id, order_id, amount_paise)
-    ok = mark_order_paid(order_id, payment_id)
-    if ok:
-        set_premium(user_id, True)
-    return ok
 
 
 def handle_razorpay_return():
     """Runs on every rerun, before anything else, so a payment redirect is verified
-    and applied exactly once even if the page is refreshed afterwards."""
+    and applied exactly once even if the page is refreshed afterwards. Deliberately
+    does NOT depend on st.session_state['user'] being present — a full-page
+    redirect back from Razorpay can land in a fresh browser session, so the
+    account to credit comes from the payments ledger (order_owner), not from
+    whoever happens to be logged in on this particular run."""
     params = st.query_params
     order_id = params.get("rzp_order_id")
     payment_id = params.get("rzp_payment_id")
@@ -1557,6 +1884,8 @@ def handle_razorpay_return():
     if mark_order_paid(order_id, payment_id):
         set_premium(owner["user_id"], True)
         st.query_params.clear()
+        st.session_state.pop("checkout_order_id", None)
+        st.session_state.pop("checkout_rendered_for", None)
         st.session_state["just_upgraded"] = True
         st.rerun()
     else:
@@ -1567,24 +1896,11 @@ def handle_razorpay_return():
 # STREAMLIT APP
 # ============================================================
 
-st.set_page_config(
-    page_title="Kuṇḍalī", page_icon="✨", layout="wide",
-    menu_items={"Get Help": None, "Report a bug": None, "About": None},
-)
+st.set_page_config(page_title="Kuṇḍalī", page_icon="✨", layout="wide")
 
 st.markdown(
     f"""
     <style>
-    /* Hide Streamlit's own chrome for a clean, professional look:
-       main hamburger menu, "Deploy" button, footer, and the
-       "Hosted with Streamlit" badge in the bottom-right corner. */
-    #MainMenu {{ visibility: hidden; }}
-    header[data-testid="stHeader"] {{ visibility: hidden; height: 0; }}
-    footer {{ visibility: hidden; height: 0; }}
-    .stAppDeployButton {{ display: none; }}
-    div[data-testid="stStatusWidget"] {{ visibility: hidden; }}
-    a[href*="streamlit.io"] {{ display: none !important; }}
-
     .stApp {{ background-color: {C["bg"]}; color: {C["ivory"]}; font-size: 17px; }}
     .kcard {{
         background: {C["panel"]}; border: 1px solid {C["line"]};
@@ -1645,16 +1961,6 @@ with topbar_r:
         del st.session_state["user"]
         st.session_state.pop("form", None)
         st.rerun()
-
-if PAYMENT_TEST_MODE:
-    st.markdown(
-        '<div style="background:#FCE8E6;border:1px solid #D93025;border-radius:8px;'
-        'padding:8px 16px;margin-bottom:14px;color:#D93025;font-size:14px;font-weight:600;">'
-        '🧪 TEST MODE — payments are simulated. No real money moves. '
-        'Add real Razorpay keys (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, APP_BASE_URL) to go live.'
-        '</div>',
-        unsafe_allow_html=True,
-    )
 
 # ---- Load this user's saved birth details, if any, as form defaults -------
 saved_profile = load_profile(st.session_state["user"]["id"])
@@ -1873,27 +2179,28 @@ else:
         'and Viṁśottarī daśā timeline) for a one-time payment.</p>',
         unsafe_allow_html=True,
     )
-    pcol1, pcol2 = st.columns([1, 1])
-    with pcol1:
-        st.markdown(
-            f'<p style="font-size:28px;font-weight:700;color:{C["gold"]};margin-bottom:0;">₹{PREMIUM_PRICE_INR}</p>'
-            f'<p class="kmuted" style="margin-top:0;">one-time · lifetime access to report downloads</p>',
-            unsafe_allow_html=True,
+    if not RAZORPAY_CONFIGURED:
+        st.warning(
+            "Payments aren't configured yet. Set the environment variables "
+            "**RAZORPAY_KEY_ID**, **RAZORPAY_KEY_SECRET**, and **APP_BASE_URL** "
+            "(e.g. `https://yourdomain.com`) in your Render service settings, then redeploy. "
+            "Use `rzp_test_...` keys first to try the whole flow safely — see the setup "
+            "comment above `RAZORPAY_KEY_ID` in the code for exact steps and test-card numbers."
         )
-    with pcol2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if PAYMENT_TEST_MODE:
-            # ---- Test-mode path: no Razorpay call, no checkout modal, no real
-            # money. Same downstream effect (premium unlocked) so you can test
-            # the entire report-download flow right now.
-            if st.button("🧪 Simulate Payment (Test Mode)", use_container_width=True, key="simulate_payment"):
-                ok = simulate_test_payment(user_id, PREMIUM_PRICE_PAISE)
-                if ok:
-                    st.session_state["just_upgraded"] = True
-                    st.rerun()
-                else:
-                    st.error("Simulated payment could not be recorded — please try again.")
-        else:
+    else:
+        if RAZORPAY_TEST_MODE:
+            st.info("🧪 Test Mode is active (rzp_test_ key) — payments here use fake money. "
+                     "Card `4111 1111 1111 1111`, any future expiry/CVV, then any 4-10 digit OTP "
+                     "to succeed. For UPI use `success@razorpay`. Nothing is actually charged.")
+        pcol1, pcol2 = st.columns([1, 1])
+        with pcol1:
+            st.markdown(
+                f'<p style="font-size:28px;font-weight:700;color:{C["gold"]};margin-bottom:0;">₹{PREMIUM_PRICE_INR}</p>'
+                f'<p class="kmuted" style="margin-top:0;">one-time · lifetime access to report downloads</p>',
+                unsafe_allow_html=True,
+            )
+        with pcol2:
+            st.markdown("<br>", unsafe_allow_html=True)
             if st.button("Upgrade to Premium", use_container_width=True, key="start_checkout"):
                 try:
                     order = razorpay_create_order(
@@ -1901,24 +2208,35 @@ else:
                     )
                     record_order(user_id, order["id"], PREMIUM_PRICE_PAISE)
                     st.session_state["checkout_order_id"] = order["id"]
+                    st.session_state.pop("checkout_rendered_for", None)
                 except requests.HTTPError as e:
                     st.error(f"Couldn't start checkout — Razorpay rejected the request: {e}")
                 except requests.RequestException as e:
                     st.error(f"Couldn't reach Razorpay — check your connection and try again. ({e})")
 
-    # If we have a live order in flight, open the actual Razorpay Checkout modal.
-    # (Never reached in test mode, since that path sets is_premium immediately.)
-    if not PAYMENT_TEST_MODE and st.session_state.get("checkout_order_id"):
-        render_razorpay_checkout(
-            st.session_state["checkout_order_id"],
-            PREMIUM_PRICE_PAISE,
-            form.get("name", ""),
-            st.session_state["user"]["username"],
-        )
-    if PAYMENT_TEST_MODE:
-        st.caption("🧪 Test mode active — clicking the button above instantly unlocks premium. "
-                   "No Razorpay, no card, no charge.")
-    else:
+        # If we have a live order in flight, open the actual Razorpay Checkout modal —
+        # but only render/open it ONCE per order, otherwise any unrelated widget
+        # interaction elsewhere on the page (which triggers a Streamlit rerun) would
+        # pop the modal open again every single time.
+        pending_order_id = st.session_state.get("checkout_order_id")
+        if pending_order_id:
+            if st.session_state.get("checkout_rendered_for") != pending_order_id:
+                render_razorpay_checkout(
+                    pending_order_id, PREMIUM_PRICE_PAISE,
+                    form.get("name", ""), st.session_state["user"]["username"],
+                )
+                st.session_state["checkout_rendered_for"] = pending_order_id
+            else:
+                rcol1, rcol2 = st.columns([1, 1])
+                with rcol1:
+                    if st.button("Reopen payment window", use_container_width=True, key="reopen_checkout"):
+                        st.session_state["checkout_rendered_for"] = None
+                        st.rerun()
+                with rcol2:
+                    if st.button("Cancel", use_container_width=True, key="cancel_checkout"):
+                        st.session_state.pop("checkout_order_id", None)
+                        st.session_state.pop("checkout_rendered_for", None)
+                        st.rerun()
         st.caption("Secured by Razorpay · UPI, cards, netbanking, and wallets accepted.")
 st.markdown("</div>", unsafe_allow_html=True)
 
