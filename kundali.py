@@ -1745,12 +1745,15 @@ def generate_kundali_html_report(birth_chart, form) -> str:
 
 
 # ============================================================
-# RAZORPAY — real payments (+ automatic Test Mode when unconfigured)
+# RAZORPAY — real payments only. No test/dummy payment bypass in production.
 # ============================================================
 #
 # Reads credentials from environment variables. On Render: your service ->
 # Environment -> add RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, APP_BASE_URL.
-# Use the rzp_test_... keys first end-to-end before switching to rzp_live_....
+# Use the rzp_test_... keys first end-to-end in a private/staging deployment,
+# then switch to rzp_live_... for the public site. This app no longer ships
+# an automatic "test mode" fallback or a simulated/dummy payment button —
+# every checkout on the live site goes through real Razorpay verification.
 
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
@@ -1759,23 +1762,6 @@ PREMIUM_PRICE_INR = 299
 PREMIUM_PRICE_PAISE = PREMIUM_PRICE_INR * 100
 
 RAZORPAY_CONFIGURED = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET and APP_BASE_URL)
-
-# ---- Test mode: lets you exercise the ENTIRE premium flow (order created,
-# payment "completes", the same DB writes a real payment would trigger,
-# premium flag flips, report unlocks) without any real money moving and
-# without needing Razorpay keys at all. Controlled by one environment
-# variable so it can never accidentally stay on in production:
-#   - If RAZORPAY_KEY_ID/SECRET/APP_BASE_URL are NOT all set, test mode
-#     turns on automatically (there's no way to charge a real card anyway).
-#   - Once you add real Razorpay keys on Render, RAZORPAY_CONFIGURED becomes
-#     True and test mode turns itself off automatically.
-#   - PAYMENT_TEST_MODE=1 forces test mode on even with real keys present,
-#     for staging. Never set this on a production deployment that takes
-#     real customer payments.
-PAYMENT_TEST_MODE = (
-    os.environ.get("PAYMENT_TEST_MODE", "").strip().lower() in ("1", "true", "yes")
-    or not RAZORPAY_CONFIGURED
-)
 
 
 def razorpay_create_order(amount_paise: int, receipt: str) -> dict:
@@ -1858,21 +1844,6 @@ def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, u
         """,
         height=120,
     )
-
-
-def simulate_test_payment(user_id: int, amount_paise: int) -> bool:
-    """Test-mode stand-in for the real Razorpay round trip. Creates a synthetic
-    order + payment id (clearly prefixed 'test_' so they can never collide with
-    or be mistaken for real Razorpay ids), writes them through the exact same
-    payments-ledger functions the real flow uses, then flips is_premium. No
-    network call, no Razorpay checkout, no money movement of any kind."""
-    order_id = f"test_order_{secrets.token_hex(10)}"
-    payment_id = f"test_pay_{secrets.token_hex(10)}"
-    record_order(user_id, order_id, amount_paise)
-    ok = mark_order_paid(order_id, payment_id)
-    if ok:
-        set_premium(user_id, True)
-    return ok
 
 
 def handle_razorpay_return():
@@ -1996,12 +1967,12 @@ with topbar_r:
         st.session_state.pop("form", None)
         st.rerun()
 
-if PAYMENT_TEST_MODE:
+if not RAZORPAY_CONFIGURED:
     st.markdown(
         '<div style="background:#FCE8E6;border:1px solid #D93025;border-radius:8px;'
         'padding:8px 16px;margin-bottom:14px;color:#D93025;font-size:14px;font-weight:600;">'
-        '🧪 TEST MODE — payments are simulated. No real money moves. '
-        'Add real Razorpay keys (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, APP_BASE_URL) to go live.'
+        '⚠️ Payments are not yet configured on this deployment. Set RAZORPAY_KEY_ID, '
+        'RAZORPAY_KEY_SECRET, and APP_BASE_URL as environment variables to enable premium checkout.'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -2232,17 +2203,9 @@ else:
         )
     with pcol2:
         st.markdown("<br>", unsafe_allow_html=True)
-        if PAYMENT_TEST_MODE:
-            # ---- Test-mode path: no Razorpay call, no checkout modal, no real
-            # money. Same downstream effect (premium unlocked) so you can test
-            # the entire report-download flow right now.
-            if st.button("🧪 Simulate Payment (Test Mode)", use_container_width=True, key="simulate_payment"):
-                ok = simulate_test_payment(user_id, PREMIUM_PRICE_PAISE)
-                if ok:
-                    st.session_state["just_upgraded"] = True
-                    st.rerun()
-                else:
-                    st.error("Simulated payment could not be recorded — please try again.")
+        if not RAZORPAY_CONFIGURED:
+            st.button("Upgrade to Premium", use_container_width=True, key="start_checkout", disabled=True)
+            st.caption("Checkout is disabled until Razorpay is configured on this deployment.")
         else:
             if st.button("Upgrade to Premium", use_container_width=True, key="start_checkout"):
                 try:
@@ -2263,7 +2226,7 @@ else:
     # would re-render this component and pop the checkout modal open again, which
     # is exactly what produced the "giant blank area, charts pushed out of view"
     # symptom: a tall (700px) iframe kept re-appearing on every rerun.
-    if not PAYMENT_TEST_MODE:
+    if RAZORPAY_CONFIGURED:
         pending_order_id = st.session_state.get("checkout_order_id")
         if pending_order_id:
             if st.session_state.get("checkout_rendered_for") != pending_order_id:
@@ -2284,11 +2247,7 @@ else:
                         st.session_state.pop("checkout_rendered_for", None)
                         st.rerun()
 
-    if PAYMENT_TEST_MODE:
-        st.caption("🧪 Test mode active — clicking the button above instantly unlocks premium. "
-                   "No Razorpay, no card, no charge.")
-    else:
-        st.caption("Secured by Razorpay · UPI, cards, netbanking, and wallets accepted.")
+    st.caption("Secured by Razorpay · UPI, cards, netbanking, and wallets accepted.")
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ---- Row 2: Nakṣatra table + Vimśottarī Mahādaśā + Pañcāṅga -------------
