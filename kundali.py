@@ -1795,10 +1795,9 @@ def razorpay_verify_signature(order_id: str, payment_id: str, signature: str) ->
 def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, username: str):
     """Opens the Razorpay Checkout modal immediately and, on success, redirects the
     top-level browser back to this app with the payment proof in the query string
-    so Streamlit can verify it server-side on the next run. Kept short (120px)
-    because the actual payment UI is Razorpay's own overlay/popup, not something
-    that needs a tall embedded frame — a tall frame here just leaves a big blank
-    gap on the page while checkout is idle or fails silently."""
+    so Streamlit can verify it server-side on the next run. Rendered tall (700px)
+    with scrolling enabled so the embedded checkout modal has room to display
+    fully instead of being clipped."""
     success_url = f"{APP_BASE_URL}/?rzp_order_id={order_id}"
     st.components.v1.html(
         f"""
@@ -1843,7 +1842,7 @@ def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, u
         </script>
         """,
         height=700,
-        scrolling=true,
+        scrolling=True,
     )
 
 
