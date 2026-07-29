@@ -1091,6 +1091,22 @@ def init_db():
         )
     """)
 
+    # ---- Guest premium status. While login/signup is disabled, every visitor
+    # is a random session-scoped "guest" id that is NEVER inserted into the
+    # users table — so the old users.is_premium column can never be set or
+    # read for them (UPDATE ... WHERE id=<guest id> silently matches zero
+    # rows). This table tracks premium status against that guest id directly,
+    # independent of users, so premium unlocks actually work while login is
+    # off. When real accounts are restored, is_premium()/set_premium() below
+    # should be pointed back at users.is_premium.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS guest_premium (
+            guest_id INTEGER PRIMARY KEY,
+            is_premium INTEGER NOT NULL DEFAULT 0,
+            updated_at REAL
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -1152,14 +1168,22 @@ def authenticate(username: str, password: str):
 
 def is_premium(user_id: int) -> bool:
     conn = get_conn()
-    row = conn.execute("SELECT is_premium FROM users WHERE id=?", (user_id,)).fetchone()
+    row = conn.execute("SELECT is_premium FROM guest_premium WHERE guest_id=?", (user_id,)).fetchone()
     conn.close()
     return bool(row and row["is_premium"])
 
 
 def set_premium(user_id: int, value: bool = True):
     conn = get_conn()
-    conn.execute("UPDATE users SET is_premium=? WHERE id=?", (1 if value else 0, user_id))
+    conn.execute(
+        """
+        INSERT INTO guest_premium (guest_id, is_premium, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(guest_id) DO UPDATE SET
+            is_premium=excluded.is_premium, updated_at=excluded.updated_at
+        """,
+        (user_id, 1 if value else 0, time.time()),
+    )
     conn.commit()
     conn.close()
 
