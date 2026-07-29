@@ -1793,52 +1793,70 @@ def razorpay_verify_signature(order_id: str, payment_id: str, signature: str) ->
 
 
 def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, username: str):
-    """Opens the Razorpay Checkout modal immediately and, on success, redirects the
-    top-level browser back to this app with the payment proof in the query string
-    so Streamlit can verify it server-side on the next run. Rendered tall (700px)
-    with scrolling enabled so the embedded checkout modal has room to display
-    fully instead of being clipped."""
+    """Opens the Razorpay Checkout modal once checkout.js has actually finished
+    loading, and on success redirects the top-level browser back to this app
+    with the payment proof in the query string so Streamlit can verify it
+    server-side on the next run. Rendered tall (700px) with scrolling enabled
+    so the checkout modal has room to display fully instead of being clipped.
+
+    checkout.js is loaded dynamically with an onload/onerror callback instead
+    of a plain <script src=...> tag: a static tag doesn't block the next
+    <script> block from running, so on a slow connection or with an ad-blocker
+    delaying the request, `new Razorpay(...)` could execute before the
+    library exists — failing silently and leaving the user staring at
+    "Opening secure Razorpay checkout…" forever with nothing on screen."""
     success_url = f"{APP_BASE_URL}/?rzp_order_id={order_id}"
     st.components.v1.html(
         f"""
-        <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
         <div id="rzp-status" style="font-family:Georgia, serif; color:#7A6F5C; padding:10px 0; font-size:14px;">
             Opening secure Razorpay checkout…
         </div>
         <script>
-        try {{
-            var options = {{
-                "key": "{RAZORPAY_KEY_ID}",
-                "amount": "{amount_paise}",
-                "currency": "INR",
-                "name": "Kuṇḍalī",
-                "description": "Premium Kundali report",
-                "order_id": "{order_id}",
-                "prefill": {{ "name": "{user_name or username}" }},
-                "theme": {{ "color": "#B8842E" }},
-                "handler": function (response) {{
-                    var url = "{success_url}"
-                        + "&rzp_payment_id=" + encodeURIComponent(response.razorpay_payment_id)
-                        + "&rzp_signature=" + encodeURIComponent(response.razorpay_signature);
-                    window.top.location.href = url;
-                }},
-                "modal": {{
-                    "ondismiss": function () {{
+        (function () {{
+            var script = document.createElement("script");
+            script.src = "https://checkout.razorpay.com/v1/checkout.js";
+            script.onload = function () {{
+                try {{
+                    var options = {{
+                        "key": "{RAZORPAY_KEY_ID}",
+                        "amount": "{amount_paise}",
+                        "currency": "INR",
+                        "name": "Kuṇḍalī",
+                        "description": "Premium Kundali report",
+                        "order_id": "{order_id}",
+                        "prefill": {{ "name": "{user_name or username}" }},
+                        "theme": {{ "color": "#B8842E" }},
+                        "handler": function (response) {{
+                            var url = "{success_url}"
+                                + "&rzp_payment_id=" + encodeURIComponent(response.razorpay_payment_id)
+                                + "&rzp_signature=" + encodeURIComponent(response.razorpay_signature);
+                            window.top.location.href = url;
+                        }},
+                        "modal": {{
+                            "ondismiss": function () {{
+                                document.getElementById("rzp-status").innerText =
+                                    "Checkout closed — click 'Reopen payment window' below to retry.";
+                            }}
+                        }}
+                    }};
+                    var rzp = new Razorpay(options);
+                    rzp.on('payment.failed', function (response) {{
                         document.getElementById("rzp-status").innerText =
-                            "Checkout closed — click 'Reopen payment window' below to retry.";
-                    }}
+                            "Payment failed: " + response.error.description;
+                    }});
+                    rzp.open();
+                }} catch (e) {{
+                    document.getElementById("rzp-status").innerText =
+                        "Couldn't open Razorpay checkout: " + e.message;
                 }}
             }};
-            var rzp = new Razorpay(options);
-            rzp.on('payment.failed', function (response) {{
+            script.onerror = function () {{
                 document.getElementById("rzp-status").innerText =
-                    "Payment failed: " + response.error.description;
-            }});
-            rzp.open();
-        }} catch (e) {{
-            document.getElementById("rzp-status").innerText =
-                "Couldn't open Razorpay checkout: " + e.message;
-        }}
+                    "Couldn't load the Razorpay checkout script. Check your network " +
+                    "connection or ad-blocker, then click 'Reopen payment window' below to retry.";
+            }};
+            document.body.appendChild(script);
+        }})();
         </script>
         """,
         height=700,
