@@ -1868,9 +1868,16 @@ def handle_razorpay_return():
     """Runs on every rerun, before anything else, so a payment redirect is verified
     and applied exactly once even if the page is refreshed afterwards. Deliberately
     does NOT depend on st.session_state['user'] being present — a full-page
-    redirect back from Razorpay can land in a fresh browser session, so the
-    account to credit comes from the payments ledger (order_owner), not from
-    whoever happens to be logged in on this particular run."""
+    redirect back from Razorpay (window.top.location.href) always lands in a
+    brand-new Streamlit session, which (since login is disabled) gets a freshly
+    random guest id that has nothing to do with the guest id that actually paid.
+    So the account to credit comes from the payments ledger (order_owner), and
+    — critically — that same id is written into this new session's
+    st.session_state['user'], overwriting whatever random guest id this fresh
+    session was just given. Without this, the payment is recorded correctly in
+    the database but premium/report access appears to "not work," because the
+    session checking is_premium() afterwards is a different guest than the one
+    who paid."""
     params = st.query_params
     order_id = params.get("rzp_order_id")
     payment_id = params.get("rzp_payment_id")
@@ -1878,6 +1885,9 @@ def handle_razorpay_return():
     if not (order_id and payment_id and signature):
         return
     if payment_already_verified(payment_id):
+        owner = order_owner(order_id)
+        if owner is not None:
+            st.session_state["user"] = {"id": owner["user_id"], "username": "guest"}
         st.query_params.clear()
         return
     if not razorpay_verify_signature(order_id, payment_id, signature):
@@ -1893,6 +1903,7 @@ def handle_razorpay_return():
         return
     if mark_order_paid(order_id, payment_id):
         set_premium(owner["user_id"], True)
+        st.session_state["user"] = {"id": owner["user_id"], "username": "guest"}
         st.query_params.clear()
         st.session_state.pop("checkout_order_id", None)
         st.session_state.pop("checkout_rendered_for", None)
