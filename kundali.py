@@ -1504,15 +1504,26 @@ HOUSE_FRACS = [
 ]
 
 
-def draw_diamond_chart_pdf(pdf, bodies, asc_sign: int, asc_body: dict, x0: float, y0: float, size: float):
-    """Draws a real North-Indian diamond Rasi chart directly with fpdf2's vector
-    primitives (no external image/rasterizer needed)."""
+def draw_diamond_chart_pdf(pdf, bodies, transit_bodies, asc_sign: int, asc_body: dict, x0: float, y0: float, size: float):
+    """Draws a North-Indian diamond Rasi chart directly with fpdf2's vector
+    primitives (no external image/rasterizer needed), styled to match the
+    on-screen SVG chart: gold border/diagonals over a soft cream fill, the
+    Ascendant labeled in blue, birth-planet lines in black, and transit-planet
+    lines in red — same palette and layout as build_svg_chart()."""
+    GOLD = (184, 132, 46)
+    IVORY = (58, 46, 31)
+    SINDOOR = (196, 70, 43)
+    MOON = (58, 91, 140)
+    MUTED = (122, 111, 92)
+    BG = (255, 249, 224)
+
     x1, y1 = x0 + size, y0 + size
     midx, midy = x0 + size / 2, y0 + size / 2
 
-    pdf.set_draw_color(184, 132, 46)
+    pdf.set_fill_color(*BG)
+    pdf.set_draw_color(*GOLD)
     pdf.set_line_width(0.5)
-    pdf.rect(x0, y0, size, size)
+    pdf.rect(x0, y0, size, size, style="DF")
     pdf.line(x0, y0, x1, y1)
     pdf.line(x1, y0, x0, y1)
     pdf.set_line_width(0.35)
@@ -1521,38 +1532,49 @@ def draw_diamond_chart_pdf(pdf, bodies, asc_sign: int, asc_body: dict, x0: float
     pdf.line(midx, y1, x0, midy)
     pdf.line(x0, midy, midx, y0)
 
-    by_house = [[] for _ in range(12)]
+    by_house_birth = [[] for _ in range(12)]
     for b in bodies:
         if b["key"] == "As":
             continue
-        by_house[(b["sign"] - asc_sign + 12) % 12].append(b)
+        by_house_birth[(b["sign"] - asc_sign + 12) % 12].append(b)
+
+    by_house_transit = [[] for _ in range(12)]
+    for b in (transit_bodies or []):
+        if b["key"] == "As":
+            continue
+        by_house_transit[(b["sign"] - asc_sign + 12) % 12].append(b)
 
     for h, (fx, fy) in enumerate(HOUSE_FRACS):
         cx, cy = x0 + fx * size, y0 + fy * size
         sign_num = ((asc_sign + h) % 12) + 1
-        lines = []
+
+        lines = []  # (text, color) pairs
         if h == 0:
-            lines.append(f'As {int(asc_body["inSign"])}\u00b0')
-        for b in by_house[h]:
+            lines.append((f'As {int(asc_body["inSign"])}\u00b0', MOON))
+        for b in by_house_birth[h]:
             deg = int(b["inSign"])
             retro = "R" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
-            lines.append(f'{_ascii_key(b["key"])} {deg}\u00b0{retro}')
+            lines.append((f'{_ascii_key(b["key"])} {deg}\u00b0{retro}', IVORY))
+        for b in by_house_transit[h]:
+            deg = int(b["inSign"])
+            retro = "R" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
+            lines.append((f'{_ascii_key(b["key"])} {deg}\u00b0{retro}', SINDOOR))
 
         block_h = len(lines) * 4.2
         pdf.set_font("Helvetica", "", 7)
-        pdf.set_text_color(122, 111, 92)
+        pdf.set_text_color(*MUTED)
         pdf.text(cx - 3, cy - block_h / 2 - 3, str(sign_num))
 
         ty = cy - block_h / 2
-        for line in lines:
+        for line, color in lines:
             pdf.set_font("Helvetica", "B", 8)
-            pdf.set_text_color(196, 70, 43) if (line.startswith("As ")) else pdf.set_text_color(58, 46, 31)
+            pdf.set_text_color(*color)
             pdf.set_xy(cx - 16, ty)
             pdf.cell(32, 4.2, line, align="C")
             ty += 4.2
 
 
-def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
+def generate_kundali_pdf_bytes(birth_chart, transit_chart, form) -> bytes:
     GOLD, IVORY, SINDOOR, MUTED = (184, 132, 46), (58, 46, 31), (196, 70, 43), (122, 111, 92)
     LINE, PANEL_SOFT, WHITE = (222, 196, 120), (255, 243, 176), (255, 253, 231)
 
@@ -1560,6 +1582,7 @@ def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
     b_moon = next(b for b in birth_chart["bodies"] if b["key"] == "Mo")
     pan = birth_chart["panchanga"]
     core_bodies = [b for b in birth_chart["bodies"] if b["key"] in CORE_KEYS]
+    core_transit_bodies = [b for b in transit_chart["bodies"] if b["key"] in CORE_KEYS]
     paksha_ascii, tithi_ascii = _tithi_ascii(pan)
     karana_ascii = KARANA_ASCII_MAP.get(pan["karana"], pan["karana"])
 
@@ -1643,11 +1666,12 @@ def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
     chart_size = 130
     x0 = (210 - chart_size) / 2
     y0 = pdf.get_y() + 2
-    draw_diamond_chart_pdf(pdf, core_bodies, b_asc["sign"], b_asc, x0, y0, chart_size)
+    draw_diamond_chart_pdf(pdf, core_bodies, core_transit_bodies, b_asc["sign"], b_asc, x0, y0, chart_size)
     pdf.set_y(y0 + chart_size + 5)
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(*MUTED)
-    pdf.cell(0, 5, "Houses are fixed to the birth lagna. R = retrograde.", ln=True, align="C")
+    pdf.cell(0, 5, "Houses are fixed to the birth lagna. Black = birth, Red = transit (now). R = retrograde.",
+              ln=True, align="C")
 
     # ---------------- Page 2: Panchanga + Chara Karaka ----------------
     pdf.add_page()
@@ -2269,7 +2293,7 @@ if is_premium(user_id):
         unsafe_allow_html=True,
     )
     if HAS_FPDF:
-        pdf_bytes = generate_kundali_pdf_bytes(birth_chart, form)
+        pdf_bytes = generate_kundali_pdf_bytes(birth_chart, transit_chart, form)
         st.download_button(
             "📄 Download Kundali PDF", data=pdf_bytes,
             file_name=f"kundali_{form['city'][0]}_{form['dob'].isoformat()}.pdf",
