@@ -973,16 +973,29 @@ def build_circular_svg_chart(birth_bodies, transit_bodies, asc_sign: int, asc_de
 # AUTH / DATABASE  — accounts (username + password only), saved profiles
 # ============================================================
 #
-# Storage: a local SQLite file next to this script. Fine for a single-instance
-# deployment; if you scale to multiple app instances behind a load balancer,
-# swap DB_PATH for a shared Postgres/MySQL connection string instead — the
+# Storage: a local SQLite file. On a platform with ephemeral local disk
+# (e.g. Render's default app directory), writing next to the script means
+# every restart/redeploy silently wipes all data — payments, premium status,
+# saved profiles, everything. To avoid that trap, this defaults to a
+# persistent-disk mount at /var/data if one exists (Render: dashboard ->
+# your service -> Disks -> mount path /var/data), and only falls back to the
+# script's own directory if no such mount is present. You can still override
+# either behavior explicitly with the DB_DIR environment variable.
+# If you scale to multiple app instances behind a load balancer, swap
+# DB_PATH for a shared Postgres/MySQL connection string instead — the
 # functions below are the only place that would need to change.
 #
 # No email is collected or required. Uniqueness is enforced on username only
 # (case-insensitive), so "PushpinderS" and "pushpinders" are the same account
 # and a second signup with either casing is rejected.
 
-DB_PATH = os.path.join(os.environ.get("DB_DIR", os.path.dirname(os.path.abspath(__file__))), "kundali_users.db")
+_PERSISTENT_DISK_DIR = "/var/data"
+_DEFAULT_DB_DIR = (
+    _PERSISTENT_DISK_DIR
+    if os.path.isdir(_PERSISTENT_DISK_DIR)
+    else os.path.dirname(os.path.abspath(__file__))
+)
+DB_PATH = os.path.join(os.environ.get("DB_DIR", _DEFAULT_DB_DIR), "kundali_users.db")
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 
@@ -1818,17 +1831,30 @@ def razorpay_verify_signature(order_id: str, payment_id: str, signature: str) ->
 
 def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, username: str):
     """Opens the Razorpay Checkout modal once checkout.js has actually finished
-    loading, and on success redirects the top-level browser back to this app
-    with the payment proof in the query string so Streamlit can verify it
-    server-side on the next run. Rendered tall (700px) with scrolling enabled
-    so the checkout modal has room to display fully instead of being clipped.
+    loading, and on success shows a "Continue" button that sends the browser
+    back to this app with the payment proof in the query string so Streamlit
+    can verify it server-side. Rendered tall (700px) with scrolling enabled so
+    the checkout modal has room to display fully instead of being clipped.
 
     checkout.js is loaded dynamically with an onload/onerror callback instead
     of a plain <script src=...> tag: a static tag doesn't block the next
     <script> block from running, so on a slow connection or with an ad-blocker
     delaying the request, `new Razorpay(...)` could execute before the
     library exists — failing silently and leaving the user staring at
-    "Opening secure Razorpay checkout…" forever with nothing on screen."""
+    "Opening secure Razorpay checkout…" forever with nothing on screen.
+
+    The post-payment redirect is a click, not automatic: Streamlit renders
+    this widget inside a sandboxed iframe, and browsers only allow JS to
+    navigate the TOP-level page (window.top.location) when it's triggered by
+    a direct user gesture. Razorpay's own "Payment Successful — redirecting
+    in 4 seconds" auto-close happens via an internal timer, several ticks
+    removed from any click — so calling window.top.location.href straight
+    from the `handler` callback gets silently blocked by the browser, and
+    the user is left stuck looking "successful" with nothing actually
+    happening. Attempting the auto-redirect and then always also showing a
+    real button covers both cases: it completes on its own where the
+    browser allows it, and gives the user something to click where it
+    doesn't."""
     success_url = f"{APP_BASE_URL}/?rzp_order_id={order_id}"
     st.components.v1.html(
         f"""
@@ -1854,7 +1880,20 @@ def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, u
                             var url = "{success_url}"
                                 + "&rzp_payment_id=" + encodeURIComponent(response.razorpay_payment_id)
                                 + "&rzp_signature=" + encodeURIComponent(response.razorpay_signature);
-                            window.top.location.href = url;
+                            var statusEl = document.getElementById("rzp-status");
+                            statusEl.innerHTML =
+                                '<div style="color:#1e7e34; font-weight:700; margin-bottom:10px;">'
+                                + '✅ Payment successful!</div>'
+                                + '<button id="rzp-continue-btn" style="background:#B8842E; color:#fff; '
+                                + 'border:none; border-radius:6px; padding:10px 20px; font-size:14px; '
+                                + 'font-family:Georgia, serif; cursor:pointer;">Continue to your report →</button>';
+                            document.getElementById("rzp-continue-btn").onclick = function () {{
+                                window.top.location.href = url;
+                            }};
+                            // Also try navigating automatically — this succeeds in browsers
+                            // that permit it, and is a harmless no-op (silently blocked)
+                            // in browsers that don't, leaving the button as the fallback.
+                            try {{ window.top.location.href = url; }} catch (e) {{}}
                         }},
                         "modal": {{
                             "ondismiss": function () {{
