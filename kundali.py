@@ -1942,10 +1942,19 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---- Auth gate: nothing below runs until the person is logged in ----------
+# ---- Auth temporarily disabled: everyone gets an auto-assigned, session-scoped
+# "guest" identity instead of the login/signup screen. This id is random per
+# browser session and is NOT persisted to the users table, so different
+# visitors don't collide on the same saved profile or premium status — but it
+# also means a guest's saved chart / premium unlock only lasts for as long as
+# that browser tab's session stays open (a refresh in a new session starts
+# fresh). Re-enable real accounts by restoring the block that called
+# render_auth_screen() + st.stop() when you're ready to bring login back.
 if "user" not in st.session_state:
-    render_auth_screen()
-    st.stop()
+    st.session_state["user"] = {
+        "id": int(secrets.token_hex(4), 16),
+        "username": "guest",
+    }
 
 handle_razorpay_return()
 if st.session_state.pop("just_upgraded", False):
@@ -1961,11 +1970,7 @@ with topbar_l:
 with topbar_r:
     st.markdown("<br>", unsafe_allow_html=True)
     premium_badge = " · ⭐ Premium" if is_premium(st.session_state["user"]["id"]) else ""
-    st.markdown(f'<p class="kmuted" style="text-align:right;">Signed in as <b>{st.session_state["user"]["username"]}</b>{premium_badge}</p>', unsafe_allow_html=True)
-    if st.button("Log out", use_container_width=True):
-        del st.session_state["user"]
-        st.session_state.pop("form", None)
-        st.rerun()
+    st.markdown(f'<p class="kmuted" style="text-align:right;">{premium_badge}</p>', unsafe_allow_html=True)
 
 if not RAZORPAY_CONFIGURED:
     st.markdown(
