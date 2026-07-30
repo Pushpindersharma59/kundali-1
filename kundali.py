@@ -28,9 +28,11 @@ import hmac
 import os
 import re
 import secrets
+import smtplib
 import sqlite3
 import time
 from datetime import datetime, timedelta, date, time as dtime
+from email.mime.text import MIMEText
 
 import streamlit as st
 import pandas as pd
@@ -998,6 +1000,7 @@ _DEFAULT_DB_DIR = (
 DB_PATH = os.path.join(os.environ.get("DB_DIR", _DEFAULT_DB_DIR), "kundali_users.db")
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def get_conn():
@@ -1087,6 +1090,29 @@ def init_db():
     if "is_premium" not in cols_now:
         conn.execute("ALTER TABLE users ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0")
 
+    # ---- Migration: add email + email-verification columns for the new
+    # signup flow (real accounts, one per verified email). email_lower has a
+    # separate partial unique index (rather than an inline UNIQUE column)
+    # because ALTER TABLE ADD COLUMN can't add a UNIQUE constraint directly in
+    # SQLite, and a plain unique index still enforces "one account per email"
+    # going forward — the partial WHERE clause lets any pre-existing rows
+    # with no email (NULL) coexist without tripping the uniqueness check.
+    cols_now = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "email" not in cols_now:
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    if "email_lower" not in cols_now:
+        conn.execute("ALTER TABLE users ADD COLUMN email_lower TEXT")
+    if "email_verified" not in cols_now:
+        conn.execute("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0")
+    if "verify_code" not in cols_now:
+        conn.execute("ALTER TABLE users ADD COLUMN verify_code TEXT")
+    if "verify_expires" not in cols_now:
+        conn.execute("ALTER TABLE users ADD COLUMN verify_expires REAL")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower "
+        "ON users(email_lower) WHERE email_lower IS NOT NULL"
+    )
+
     # ---- Real-money payments ledger. razorpay_payment_id is UNIQUE so a
     # payment can only ever be applied once, even if the success redirect
     # somehow fires twice (double click, page refresh, browser back button).
@@ -1114,7 +1140,7 @@ def init_db():
     # can link to normally (a real <a> in the main page, not inside any
     # injected iframe), so the browser handles it exactly like clicking any
     # other link — no sandbox involved. reference_id is UNIQUE so it can
-    # reliably map a completed payment back to the guest who started it.
+    # reliably map a completed payment back to the account that started it.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS payment_links (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1129,21 +1155,30 @@ def init_db():
         )
     """)
 
-    # ---- Guest premium status. While login/signup is disabled, every visitor
-    # is a random session-scoped "guest" id that is NEVER inserted into the
-    # users table — so the old users.is_premium column can never be set or
-    # read for them (UPDATE ... WHERE id=<guest id> silently matches zero
-    # rows). This table tracks premium status against that guest id directly,
-    # independent of users, so premium unlocks actually work while login is
-    # off. When real accounts are restored, is_premium()/set_premium() below
-    # should be pointed back at users.is_premium.
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS guest_premium (
-            guest_id INTEGER PRIMARY KEY,
-            is_premium INTEGER NOT NULL DEFAULT 0,
-            updated_at REAL
-        )
-    """)
+    # ---- Premium status, tracked independently of users.is_premium. Kept as
+    # its own small table (rather than a plain column) since this app went
+    # through a phase with session-scoped "guest" accounts that had no row in
+    # users at all — this table (formerly named guest_premium) works for any
+    # integer id regardless of whether it belongs to a real logged-in account.
+    # Existing data from that phase is preserved by migrating it forward.
+    existing_tables = {
+        row["name"] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "premium_status" not in existing_tables:
+        conn.execute("""
+            CREATE TABLE premium_status (
+                user_id INTEGER PRIMARY KEY,
+                is_premium INTEGER NOT NULL DEFAULT 0,
+                updated_at REAL
+            )
+        """)
+        if "guest_premium" in existing_tables:
+            conn.execute(
+                "INSERT INTO premium_status (user_id, is_premium, updated_at) "
+                "SELECT guest_id, is_premium, updated_at FROM guest_premium"
+            )
 
     conn.commit()
     conn.close()
@@ -1172,41 +1207,115 @@ def username_taken(username: str) -> bool:
     return row is not None
 
 
-def create_user(username: str, password: str):
-    """Returns (ok, message)."""
+def email_taken(email: str) -> bool:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT 1 FROM users WHERE email_lower=?", (email.lower(),)
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def generate_verification_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def create_user(username: str, password: str, email: str):
+    """Returns (ok, message, user_id, verify_code). user_id/verify_code are
+    None when ok is False. The new account starts with email_verified=0 and
+    a 15-minute verification code the caller is responsible for emailing."""
     conn = get_conn()
     pw_hash, pw_salt = hash_password(password)
+    code = generate_verification_code()
+    expires = time.time() + 15 * 60
     try:
-        conn.execute(
-            "INSERT INTO users (username, username_lower, pw_hash, pw_salt, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (username, username.lower(), pw_hash, pw_salt, time.time()),
+        cur = conn.execute(
+            "INSERT INTO users (username, username_lower, pw_hash, pw_salt, created_at, "
+            "email, email_lower, email_verified, verify_code, verify_expires) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            (username, username.lower(), pw_hash, pw_salt, time.time(),
+             email, email.lower(), code, expires),
         )
         conn.commit()
-        return True, ""
-    except sqlite3.IntegrityError:
-        return False, "That username is already taken — pick another one."
+        return True, "", cur.lastrowid, code
+    except sqlite3.IntegrityError as e:
+        if "email_lower" in str(e):
+            msg = "That email already has an account — log in instead, or use a different email."
+        else:
+            msg = "That username is already taken — pick another one."
+        return False, msg, None, None
     finally:
         conn.close()
 
 
-def authenticate(username: str, password: str):
-    """Returns (user_dict_or_None, message)."""
+def verify_email_code(user_id: int, code: str):
+    """Returns (ok, message)."""
     conn = get_conn()
     row = conn.execute(
-        "SELECT * FROM users WHERE username_lower=?", (username.lower(),)
+        "SELECT verify_code, verify_expires FROM users WHERE id=?", (user_id,)
+    ).fetchone()
+    if row is None:
+        conn.close()
+        return False, "Account not found."
+    if not row["verify_code"]:
+        conn.close()
+        return False, "No pending verification for this account."
+    if time.time() > (row["verify_expires"] or 0):
+        conn.close()
+        return False, "That code has expired — request a new one."
+    if code.strip() != row["verify_code"]:
+        conn.close()
+        return False, "Incorrect verification code."
+    conn.execute(
+        "UPDATE users SET email_verified=1, verify_code=NULL, verify_expires=NULL WHERE id=?",
+        (user_id,),
+    )
+    conn.commit()
+    conn.close()
+    return True, ""
+
+
+def resend_verification(user_id: int):
+    """Generates and stores a fresh code, returning (ok, message, email, username, code)."""
+    conn = get_conn()
+    row = conn.execute("SELECT email, username FROM users WHERE id=?", (user_id,)).fetchone()
+    if row is None:
+        conn.close()
+        return False, "Account not found.", None, None, None
+    code = generate_verification_code()
+    expires = time.time() + 15 * 60
+    conn.execute("UPDATE users SET verify_code=?, verify_expires=? WHERE id=?", (code, expires, user_id))
+    conn.commit()
+    conn.close()
+    return True, "", row["email"], row["username"], code
+
+
+def authenticate(identifier: str, password: str):
+    """Returns (user_dict_or_None, message). identifier can be a username or
+    an email address."""
+    conn = get_conn()
+    ident_lower = identifier.lower()
+    row = conn.execute(
+        "SELECT * FROM users WHERE username_lower=? OR email_lower=?", (ident_lower, ident_lower)
     ).fetchone()
     conn.close()
     if row is None:
-        return None, "No account with that username."
+        return None, "No account with that username or email."
     if not check_password(password, row["pw_salt"], row["pw_hash"]):
         return None, "Incorrect password."
     return dict(row), ""
 
 
+def get_user_by_id(user_id: int):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def is_premium(user_id: int) -> bool:
     conn = get_conn()
-    row = conn.execute("SELECT is_premium FROM guest_premium WHERE guest_id=?", (user_id,)).fetchone()
+    row = conn.execute("SELECT is_premium FROM premium_status WHERE user_id=?", (user_id,)).fetchone()
     conn.close()
     return bool(row and row["is_premium"])
 
@@ -1215,9 +1324,9 @@ def set_premium(user_id: int, value: bool = True):
     conn = get_conn()
     conn.execute(
         """
-        INSERT INTO guest_premium (guest_id, is_premium, updated_at)
+        INSERT INTO premium_status (user_id, is_premium, updated_at)
         VALUES (?, ?, ?)
-        ON CONFLICT(guest_id) DO UPDATE SET
+        ON CONFLICT(user_id) DO UPDATE SET
             is_premium=excluded.is_premium, updated_at=excluded.updated_at
         """,
         (user_id, 1 if value else 0, time.time()),
@@ -1361,62 +1470,203 @@ def save_profile(user_id: int, name, dob_iso, tob_iso, city_name, city_region, l
 init_db()
 
 
+# ============================================================
+# EMAIL — verification codes, via any standard SMTP provider
+# ============================================================
+#
+# Configure via environment variables (Render: your service -> Environment):
+#   SMTP_HOST=smtp.gmail.com          (or your provider's SMTP host)
+#   SMTP_PORT=587                     (587 for STARTTLS, the common default)
+#   SMTP_USER=you@example.com
+#   SMTP_PASSWORD=xxxxxxxxxxxxxxxx    (an app password, not your normal login
+#                                      password, for providers like Gmail)
+#   SMTP_FROM=you@example.com         (optional — defaults to SMTP_USER)
+#
+# Any SMTP-compatible provider works (Gmail with an App Password, Outlook,
+# Zoho, SendGrid's SMTP relay, Amazon SES SMTP, etc.) — just point these at
+# its host/port/credentials.
+
+SMTP_HOST = os.environ.get("SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587") or 587)
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("SMTP_FROM", "") or SMTP_USER
+EMAIL_CONFIGURED = bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD)
+
+
+def send_verification_email(to_email: str, username: str, code: str):
+    """Returns (ok, message)."""
+    if not EMAIL_CONFIGURED:
+        return False, ("Email sending isn't configured on this deployment yet — "
+                        "set SMTP_HOST, SMTP_USER, and SMTP_PASSWORD as environment variables.")
+    body = (
+        f"Hi {username},\n\n"
+        f"Your Kuṇḍalī verification code is: {code}\n\n"
+        f"This code expires in 15 minutes. If you didn't request this, "
+        f"you can safely ignore this email.\n"
+    )
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = "Verify your Kuṇḍalī account"
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_email
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_FROM, [to_email], msg.as_string())
+        return True, ""
+    except Exception as e:
+        return False, f"Couldn't send the verification email: {e}"
+
+
+def _send_code_and_enter_pending(user_id: int, email: str, username: str, code: str):
+    """Shared helper: sends the verification email and switches the auth
+    screen into its 'enter the code' mode for this account."""
+    ok, msg = send_verification_email(email, username, code)
+    st.session_state["pending_verification"] = {
+        "user_id": user_id, "email": email, "username": username,
+    }
+    if ok:
+        st.success(f"We've sent a 6-digit code to {email}. Enter it below to verify your account.")
+    else:
+        st.warning(
+            f"Account created, but the verification email couldn't be sent ({msg}). "
+            f"Your code is: **{code}** — enter it below to continue "
+            f"(this is shown here only because email delivery isn't configured)."
+        )
+
+
 def render_auth_screen():
-    """Full-page login / signup flow. Returns nothing — sets
+    """Full-page login / signup flow, with a mandatory email-verification step
+    before an account can log in. Returns nothing — sets
     st.session_state['user'] and reruns once authenticated."""
     st.markdown(
-        f'<h1 style="color:{C["gold"]}; font-family:Georgia, serif; letter-spacing:0.06em;">Kuṇḍalī</h1>'
-        f'<p class="kmuted" style="margin-top:-10px; font-size:16px;">Sign in to save your birth details '
-        f'and come back to them anytime.</p>',
+        f"""
+        <div style="text-align:center; padding: 18px 0 6px 0;">
+            <h1 style="color:{C["gold"]}; font-family:Georgia, serif; letter-spacing:0.06em; margin-bottom:2px;">
+                Kuṇḍalī
+            </h1>
+            <p class="kmuted" style="font-size:16px; margin-top:0;">
+                Your Vedic birth chart, saved securely to your account.
+            </p>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
-    tab_login, tab_signup = st.tabs(["Log in", "Sign up"])
+    center_l, center_m, center_r = st.columns([1, 1.3, 1])
 
-    with tab_login:
-        st.markdown('<div class="kcard" style="max-width:440px;">', unsafe_allow_html=True)
-        identifier = st.text_input("Username", key="login_identifier")
-        password = st.text_input("Password", type="password", key="login_password")
-        if st.button("Log in", use_container_width=True):
-            if not identifier or not password:
-                st.error("Enter your username and password.")
-            else:
-                user, msg = authenticate(identifier.strip(), password)
-                if user:
-                    st.session_state["user"] = {"id": user["id"], "username": user["username"]}
-                    st.rerun()
-                else:
-                    st.error(msg)
-        st.markdown("</div>", unsafe_allow_html=True)
+    with center_m:
+        pending = st.session_state.get("pending_verification")
 
-    with tab_signup:
-        st.markdown('<div class="kcard" style="max-width:440px;">', unsafe_allow_html=True)
-        su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
-        su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
-        su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
-        su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
-        if st.button("Create account", use_container_width=True):
-            errors = []
-            if not USERNAME_RE.match(su_username or ""):
-                errors.append("Username must be 3-20 characters: letters, numbers, underscore only.")
-            elif username_taken(su_username):
-                errors.append("That username is already taken — pick another one.")
-            if len(su_pw or "") < 8:
-                errors.append("Password must be at least 8 characters.")
-            if su_pw != su_pw2:
-                errors.append("Passwords don't match.")
-            if not su_terms:
-                errors.append("You must agree to the Terms of Service and Privacy Policy.")
-            if errors:
-                for e in errors:
-                    st.error(e)
-            else:
-                ok, msg = create_user(su_username.strip(), su_pw)
-                if not ok:
-                    st.error(msg)
+        # ---------------- Verification-code step ----------------
+        if pending:
+            st.markdown(
+                f'<div class="kcard">'
+                f'<h4 style="margin-top:0;">✉️ Verify your email</h4>'
+                f'<p class="kmuted">We sent a 6-digit code to <b>{pending["email"]}</b>. '
+                f'Enter it below — it expires in 15 minutes.</p>',
+                unsafe_allow_html=True,
+            )
+            code_input = st.text_input(
+                "Verification code", key="verify_code_input", max_chars=6,
+                placeholder="123456",
+            )
+            vcol1, vcol2 = st.columns([1, 1])
+            with vcol1:
+                if st.button("Verify & continue", use_container_width=True, key="verify_code_btn"):
+                    ok, msg = verify_email_code(pending["user_id"], (code_input or "").strip())
+                    if ok:
+                        st.session_state["user"] = {
+                            "id": pending["user_id"], "username": pending["username"],
+                        }
+                        st.session_state.pop("pending_verification", None)
+                        st.success("Email verified! Logging you in…")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+            with vcol2:
+                if st.button("Resend code", use_container_width=True, key="resend_code_btn"):
+                    ok, msg, email, username, code = resend_verification(pending["user_id"])
+                    if ok:
+                        _send_code_and_enter_pending(pending["user_id"], email, username, code)
+                    else:
+                        st.error(msg)
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("← Back to log in / sign up", key="verify_back_btn"):
+                st.session_state.pop("pending_verification", None)
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        # ---------------- Log in / sign up ----------------
+        if not EMAIL_CONFIGURED:
+            st.info(
+                "ℹ️ Email sending isn't configured on this deployment yet, so new signups "
+                "will show their verification code directly on-screen instead of by email. "
+                "Set SMTP_HOST / SMTP_USER / SMTP_PASSWORD to enable real email delivery."
+            )
+
+        tab_login, tab_signup = st.tabs(["🔐 Log in", "✨ Create account"])
+
+        with tab_login:
+            st.markdown('<div class="kcard">', unsafe_allow_html=True)
+            identifier = st.text_input("Username or email", key="login_identifier")
+            password = st.text_input("Password", type="password", key="login_password")
+            if st.button("Log in", use_container_width=True, key="login_btn"):
+                if not identifier or not password:
+                    st.error("Enter your username/email and password.")
                 else:
-                    st.success("Account created — you can log in now.")
-        st.markdown("</div>", unsafe_allow_html=True)
+                    user, msg = authenticate(identifier.strip(), password)
+                    if user is None:
+                        st.error(msg)
+                    elif not user["email_verified"]:
+                        ok, rmsg, email, username, code = resend_verification(user["id"])
+                        if ok:
+                            _send_code_and_enter_pending(user["id"], email, username, code)
+                            st.rerun()
+                        else:
+                            st.error(rmsg)
+                    else:
+                        st.session_state["user"] = {"id": user["id"], "username": user["username"]}
+                        st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with tab_signup:
+            st.markdown('<div class="kcard">', unsafe_allow_html=True)
+            su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
+            su_email = st.text_input("Email address", key="su_email", placeholder="you@example.com")
+            su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
+            su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
+            su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
+            st.caption("Only one account can be created per email address.")
+            if st.button("Create account", use_container_width=True, key="signup_btn"):
+                errors = []
+                if not USERNAME_RE.match(su_username or ""):
+                    errors.append("Username must be 3-20 characters: letters, numbers, underscore only.")
+                elif username_taken(su_username):
+                    errors.append("That username is already taken — pick another one.")
+                if not EMAIL_RE.match(su_email or ""):
+                    errors.append("Enter a valid email address.")
+                elif email_taken(su_email):
+                    errors.append("That email already has an account — log in instead, or use a different email.")
+                if len(su_pw or "") < 8:
+                    errors.append("Password must be at least 8 characters.")
+                if su_pw != su_pw2:
+                    errors.append("Passwords don't match.")
+                if not su_terms:
+                    errors.append("You must agree to the Terms of Service and Privacy Policy.")
+                if errors:
+                    for e in errors:
+                        st.error(e)
+                else:
+                    ok, msg, new_user_id, code = create_user(su_username.strip(), su_pw, su_email.strip())
+                    if not ok:
+                        st.error(msg)
+                    else:
+                        _send_code_and_enter_pending(new_user_id, su_email.strip(), su_username.strip(), code)
+                        st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ============================================================
@@ -1946,19 +2196,15 @@ def razorpay_verify_link_signature(plink_id: str, reference_id: str, status: str
 
 
 def handle_razorpay_return():
-    """Runs on every rerun, before anything else, so a payment redirect is verified
-    and applied exactly once even if the page is refreshed afterwards. Deliberately
-    does NOT depend on st.session_state['user'] being present — a full-page
-    redirect back from Razorpay's hosted Payment Link page always lands in a
-    brand-new Streamlit session, which (since login is disabled) gets a freshly
-    random guest id that has nothing to do with the guest id that actually paid.
-    So the account to credit comes from the payment_links ledger (via
-    reference_id, which we generated and control), and — critically — that
-    same id is written into this new session's st.session_state['user'],
-    overwriting whatever random guest id this fresh session was just given.
-    Without this, the payment is recorded correctly in the database but
-    premium/report access appears to "not work," because the session checking
-    is_premium() afterwards is a different guest than the one who paid."""
+    """Runs on every rerun, before anything else (even before the login gate),
+    so a payment redirect is verified and applied exactly once even if the
+    page is refreshed afterwards. A full-page redirect back from Razorpay's
+    hosted Payment Link page always lands in a brand-new Streamlit session —
+    which, without this, would just show the login screen again, stranding
+    the user after a successful payment. So this restores the paying
+    account's real session directly (looked up from the payment_links
+    ledger via reference_id, which we generated and control), bypassing the
+    login form for this one redirect."""
     params = st.query_params
     plink_id = params.get("razorpay_payment_link_id")
     reference_id = params.get("razorpay_payment_link_reference_id")
@@ -1970,7 +2216,9 @@ def handle_razorpay_return():
     if payment_link_already_verified(payment_id):
         owner = payment_link_owner(reference_id)
         if owner is not None:
-            st.session_state["user"] = {"id": owner["user_id"], "username": "guest"}
+            acct = get_user_by_id(owner["user_id"])
+            if acct is not None:
+                st.session_state["user"] = {"id": acct["id"], "username": acct["username"]}
         st.query_params.clear()
         return
     if not razorpay_verify_link_signature(plink_id, reference_id, status, payment_id, signature):
@@ -1990,7 +2238,9 @@ def handle_razorpay_return():
         return
     if mark_payment_link_paid(reference_id, payment_id):
         set_premium(owner["user_id"], True)
-        st.session_state["user"] = {"id": owner["user_id"], "username": "guest"}
+        acct = get_user_by_id(owner["user_id"])
+        if acct is not None:
+            st.session_state["user"] = {"id": acct["id"], "username": acct["username"]}
         st.query_params.clear()
         st.session_state.pop("premium_link_url", None)
         st.session_state.pop("premium_link_reference_id", None)
@@ -2058,21 +2308,17 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---- Auth temporarily disabled: everyone gets an auto-assigned, session-scoped
-# "guest" identity instead of the login/signup screen. This id is random per
-# browser session and is NOT persisted to the users table, so different
-# visitors don't collide on the same saved profile or premium status — but it
-# also means a guest's saved chart / premium unlock only lasts for as long as
-# that browser tab's session stays open (a refresh in a new session starts
-# fresh). Re-enable real accounts by restoring the block that called
-# render_auth_screen() + st.stop() when you're ready to bring login back.
-if "user" not in st.session_state:
-    st.session_state["user"] = {
-        "id": int(secrets.token_hex(4), 16),
-        "username": "guest",
-    }
-
+# ---- Payment-redirect handling must run before the login gate: a full-page
+# redirect back from Razorpay always lands in a brand-new (logged-out)
+# session, and this restores the paying account's session directly so the
+# user isn't dropped back at the login screen right after paying.
 handle_razorpay_return()
+
+# ---- Auth gate: nothing below runs until the person is logged in ----------
+if "user" not in st.session_state:
+    render_auth_screen()
+    st.stop()
+
 if st.session_state.pop("just_upgraded", False):
     st.success("Payment verified — premium unlocked! 🎉")
 
@@ -2086,7 +2332,17 @@ with topbar_l:
 with topbar_r:
     st.markdown("<br>", unsafe_allow_html=True)
     premium_badge = " · ⭐ Premium" if is_premium(st.session_state["user"]["id"]) else ""
-    st.markdown(f'<p class="kmuted" style="text-align:right;">{premium_badge}</p>', unsafe_allow_html=True)
+    st.markdown(
+        f'<p class="kmuted" style="text-align:right;">Signed in as '
+        f'<b>{st.session_state["user"]["username"]}</b>{premium_badge}</p>',
+        unsafe_allow_html=True,
+    )
+    if st.button("Log out", use_container_width=True):
+        del st.session_state["user"]
+        st.session_state.pop("form", None)
+        st.rerun()
+
+
 
 if not RAZORPAY_CONFIGURED:
     st.markdown(
