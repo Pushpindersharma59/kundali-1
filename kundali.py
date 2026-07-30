@@ -1276,12 +1276,18 @@ def verify_email_code(user_id: int, code: str):
 
 
 def resend_verification(user_id: int):
-    """Generates and stores a fresh code, returning (ok, message, email, username, code)."""
+    """Generates and stores a fresh code, returning (ok, message, email, username, code).
+    Fails clearly if this account has no email on file yet (e.g. an account
+    created before email verification existed), rather than silently
+    returning email=None and letting a later step crash trying to send to it."""
     conn = get_conn()
     row = conn.execute("SELECT email, username FROM users WHERE id=?", (user_id,)).fetchone()
     if row is None:
         conn.close()
         return False, "Account not found.", None, None, None
+    if not row["email"]:
+        conn.close()
+        return False, "NO_EMAIL_ON_FILE", None, row["username"], None
     code = generate_verification_code()
     expires = time.time() + 15 * 60
     conn.execute("UPDATE users SET verify_code=?, verify_expires=? WHERE id=?", (code, expires, user_id))
@@ -1515,6 +1521,8 @@ EMAIL_CONFIGURED = bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD)
 
 def send_verification_email(to_email: str, username: str, code: str):
     """Returns (ok, message)."""
+    if not to_email:
+        return False, "No email address is on file for this account."
     if not EMAIL_CONFIGURED:
         return False, ("Email sending isn't configured on this deployment yet — "
                         "set SMTP_HOST, SMTP_USER, and SMTP_PASSWORD as environment variables.")
@@ -1647,6 +1655,12 @@ def render_auth_screen():
                     ok, msg, email, username, code = resend_verification(pending["user_id"])
                     if ok:
                         _send_code_and_enter_pending(pending["user_id"], email, username, code)
+                    elif msg == "NO_EMAIL_ON_FILE":
+                        st.session_state.pop("pending_verification", None)
+                        st.session_state["pending_email_needed"] = {
+                            "user_id": pending["user_id"], "username": username or pending["username"],
+                        }
+                        st.rerun()
                     else:
                         st.error(msg)
             st.markdown("<br>", unsafe_allow_html=True)
