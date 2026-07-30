@@ -1313,6 +1313,25 @@ def get_user_by_id(user_id: int):
     return dict(row) if row else None
 
 
+def set_user_email(user_id: int, email: str):
+    """Attaches an email to an existing account that predates the email-
+    verification feature (so its email column is currently NULL). Returns
+    (ok, message). Enforces the same one-account-per-email uniqueness as
+    signup."""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE users SET email=?, email_lower=? WHERE id=?",
+            (email, email.lower(), user_id),
+        )
+        conn.commit()
+        return True, ""
+    except sqlite3.IntegrityError:
+        return False, "That email already has an account — use a different one."
+    finally:
+        conn.close()
+
+
 def is_premium(user_id: int) -> bool:
     conn = get_conn()
     row = conn.execute("SELECT is_premium FROM premium_status WHERE user_id=?", (user_id,)).fetchone()
@@ -1530,7 +1549,7 @@ def _send_code_and_enter_pending(user_id: int, email: str, username: str, code: 
         st.success(f"We've sent a 6-digit code to {email}. Enter it below to verify your account.")
     else:
         st.warning(
-            f"Account created, but the verification email couldn't be sent ({msg}). "
+            f"The verification email couldn't be sent ({msg}). "
             f"Your code is: **{code}** — enter it below to continue "
             f"(this is shown here only because email delivery isn't configured)."
         )
@@ -1558,6 +1577,44 @@ def render_auth_screen():
 
     with center_m:
         pending = st.session_state.get("pending_verification")
+        needs_email = st.session_state.get("pending_email_needed")
+
+        # ---------------- Email-needed step (older accounts with no email on file) ----------------
+        if needs_email:
+            st.markdown(
+                f'<div class="kcard">'
+                f'<h4 style="margin-top:0;">✉️ Add an email to your account</h4>'
+                f'<p class="kmuted">Your account (<b>{needs_email["username"]}</b>) was created before '
+                f'email verification was required. Add an email address to continue — '
+                f"we'll send a code there to verify it.</p>",
+                unsafe_allow_html=True,
+            )
+            new_email = st.text_input("Email address", key="attach_email_input", placeholder="you@example.com")
+            ecol1, ecol2 = st.columns([1, 1])
+            with ecol1:
+                if st.button("Send verification code", use_container_width=True, key="attach_email_btn"):
+                    if not EMAIL_RE.match(new_email or ""):
+                        st.error("Enter a valid email address.")
+                    elif email_taken(new_email):
+                        st.error("That email already has an account — use a different one.")
+                    else:
+                        ok, msg = set_user_email(needs_email["user_id"], new_email.strip())
+                        if not ok:
+                            st.error(msg)
+                        else:
+                            ok2, rmsg, email, username, code = resend_verification(needs_email["user_id"])
+                            if ok2:
+                                st.session_state.pop("pending_email_needed", None)
+                                _send_code_and_enter_pending(needs_email["user_id"], email, username, code)
+                                st.rerun()
+                            else:
+                                st.error(rmsg)
+            with ecol2:
+                if st.button("← Back to log in / sign up", use_container_width=True, key="attach_email_back_btn"):
+                    st.session_state.pop("pending_email_needed", None)
+                    st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
 
         # ---------------- Verification-code step ----------------
         if pending:
@@ -1621,12 +1678,20 @@ def render_auth_screen():
                     if user is None:
                         st.error(msg)
                     elif not user["email_verified"]:
-                        ok, rmsg, email, username, code = resend_verification(user["id"])
-                        if ok:
-                            _send_code_and_enter_pending(user["id"], email, username, code)
+                        if not user.get("email"):
+                            # Account predates the email-verification feature —
+                            # there's no address to send a code to yet.
+                            st.session_state["pending_email_needed"] = {
+                                "user_id": user["id"], "username": user["username"],
+                            }
                             st.rerun()
                         else:
-                            st.error(rmsg)
+                            ok, rmsg, email, username, code = resend_verification(user["id"])
+                            if ok:
+                                _send_code_and_enter_pending(user["id"], email, username, code)
+                                st.rerun()
+                            else:
+                                st.error(rmsg)
                     else:
                         st.session_state["user"] = {"id": user["id"], "username": user["username"]}
                         st.rerun()
