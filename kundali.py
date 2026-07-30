@@ -37,6 +37,7 @@ from email.mime.text import MIMEText
 import streamlit as st
 import pandas as pd
 import requests
+import razorpay
 
 # ============================================================
 # ASTRONOMY ENGINE  (direct port of the JS math, same formulas)
@@ -2215,6 +2216,10 @@ PREMIUM_PRICE_PAISE = PREMIUM_PRICE_INR * 100
 
 RAZORPAY_CONFIGURED = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET and APP_BASE_URL)
 
+# Official SDK client, used for the Standard Checkout (embedded modal) path
+# below. requires `pip install razorpay` in requirements.txt.
+_razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)) if RAZORPAY_CONFIGURED else None
+
 
 def razorpay_create_payment_link(amount_paise: int, reference_id: str, callback_url: str, customer_name: str = "") -> dict:
     """Creates a Razorpay Payment Link server-side (using the secret key, never
@@ -2254,6 +2259,170 @@ def razorpay_verify_link_signature(plink_id: str, reference_id: str, status: str
     msg = f"{plink_id}|{reference_id}|{status}|{payment_id}".encode("utf-8")
     expected = hmac.new(RAZORPAY_KEY_SECRET.encode("utf-8"), msg, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
+
+
+# ============================================================
+# STANDARD CHECKOUT (embedded Checkout.js modal) — official SDK version.
+# ============================================================
+#
+# Added on request to match Razorpay's generic "Standard Web Checkout"
+# integration prompt. Kept as an ADDITIONAL option alongside Payment Links
+# above, not a replacement: direct testing in this app's actual deployment
+# confirmed that Streamlit renders this modal inside a sandboxed iframe that
+# blocks it from completing its post-payment redirect — neither
+# window.top.location.href nor window.open() could escape it from a click,
+# let alone automatically. Payment Links (above) sidesteps that entirely and
+# is the reliable path; this is offered as a secondary/experimental option
+# since it may behave differently in some browsers, and to satisfy Razorpay's
+# dashboard integration checklist if that turns out to matter for your
+# account. The UI below labels it accordingly.
+
+def razorpay_create_order_sdk(amount_paise: int, receipt: str) -> dict:
+    """Creates a Razorpay Order via the official SDK (server-side, secret key
+    never exposed to the browser). Raises on failure."""
+    return _razorpay_client.order.create({
+        "amount": amount_paise,
+        "currency": "INR",
+        "receipt": receipt,
+        "payment_capture": 1,
+    })
+
+
+def razorpay_verify_order_signature_sdk(order_id: str, payment_id: str, signature: str) -> bool:
+    """Standard Checkout signature check via the official SDK: HMAC-SHA256 of
+    'order_id|payment_id' using the account's key secret — same algorithm
+    Razorpay's own integration docs describe. Returns False on mismatch
+    instead of letting the SDK's exception propagate."""
+    try:
+        _razorpay_client.utility.verify_payment_signature({
+            "razorpay_order_id": order_id,
+            "razorpay_payment_id": payment_id,
+            "razorpay_signature": signature,
+        })
+        return True
+    except razorpay.errors.SignatureVerificationError:
+        return False
+
+
+def render_standard_checkout(order_id: str, amount_paise: int, user_name: str, username: str):
+    """Opens the Razorpay Checkout modal once checkout.js has finished
+    loading, and on success shows a 'Continue' button that attempts both an
+    automatic redirect and a click-triggered new tab — whichever the
+    browser's sandbox permits, if either."""
+    success_url = f"{APP_BASE_URL}/?rzp_order_id={order_id}"
+    st.components.v1.html(
+        f"""
+        <div id="rzp-std-status" style="font-family:Georgia, serif; color:#7A6F5C; padding:10px 0; font-size:14px;">
+            Opening secure Razorpay checkout…
+        </div>
+        <script>
+        (function () {{
+            var script = document.createElement("script");
+            script.src = "https://checkout.razorpay.com/v1/checkout.js";
+            script.onload = function () {{
+                try {{
+                    var options = {{
+                        "key": "{RAZORPAY_KEY_ID}",
+                        "amount": "{amount_paise}",
+                        "currency": "INR",
+                        "name": "Kuṇḍalī",
+                        "description": "Premium Kundali report",
+                        "order_id": "{order_id}",
+                        "prefill": {{ "name": "{user_name or username}" }},
+                        "theme": {{ "color": "#B8842E" }},
+                        "handler": function (response) {{
+                            var url = "{success_url}"
+                                + "&rzp_payment_id=" + encodeURIComponent(response.razorpay_payment_id)
+                                + "&rzp_signature=" + encodeURIComponent(response.razorpay_signature);
+                            var statusEl = document.getElementById("rzp-std-status");
+                            statusEl.innerHTML =
+                                '<div style="color:#1e7e34; font-weight:700; margin-bottom:10px;">'
+                                + '✅ Payment successful!</div>'
+                                + '<button id="rzp-std-continue-btn" style="background:#B8842E; color:#fff; '
+                                + 'border:none; border-radius:6px; padding:10px 20px; font-size:14px; '
+                                + 'font-family:Georgia, serif; cursor:pointer;">Continue →</button>'
+                                + '<div style="margin-top:8px; font-size:12px; color:#7A6F5C;">'
+                                + \"If clicking doesn't do anything, use the Payment Link option instead.</div>\";
+                            document.getElementById("rzp-std-continue-btn").onclick = function () {{
+                                try {{ window.open(url, "_blank"); }} catch (e) {{}}
+                                try {{ window.top.location.href = url; }} catch (e) {{}}
+                            }};
+                            try {{ window.open(url, "_blank"); }} catch (e) {{}}
+                            try {{ window.top.location.href = url; }} catch (e) {{}}
+                        }},
+                        "modal": {{
+                            "ondismiss": function () {{
+                                document.getElementById("rzp-std-status").innerText =
+                                    "Checkout closed.";
+                            }}
+                        }}
+                    }};
+                    var rzp = new Razorpay(options);
+                    rzp.on('payment.failed', function (response) {{
+                        document.getElementById("rzp-std-status").innerText =
+                            "Payment failed: " + response.error.description;
+                    }});
+                    rzp.open();
+                }} catch (e) {{
+                    document.getElementById("rzp-std-status").innerText =
+                        "Couldn't open Razorpay checkout: " + e.message;
+                }}
+            }};
+            script.onerror = function () {{
+                document.getElementById("rzp-std-status").innerText =
+                    "Couldn't load the Razorpay checkout script.";
+            }};
+            document.body.appendChild(script);
+        }})();
+        </script>
+        """,
+        height=700,
+        scrolling=True,
+    )
+
+
+def handle_razorpay_order_return():
+    """Standard-Checkout counterpart to handle_razorpay_return() (which
+    handles Payment Links). Same pattern: verify the signature, credit the
+    right account (looked up from the payments ledger via order_id, not
+    from whoever's logged into this fresh post-redirect session), and
+    restore that account's session directly."""
+    params = st.query_params
+    order_id = params.get("rzp_order_id")
+    payment_id = params.get("rzp_payment_id")
+    signature = params.get("rzp_signature")
+    if not (order_id and payment_id and signature):
+        return
+    if payment_already_verified(payment_id):
+        owner = order_owner(order_id)
+        if owner is not None:
+            acct = get_user_by_id(owner["user_id"])
+            if acct is not None:
+                st.session_state["user"] = {"id": acct["id"], "username": acct["username"]}
+        st.query_params.clear()
+        return
+    if not razorpay_verify_order_signature_sdk(order_id, payment_id, signature):
+        st.query_params.clear()
+        st.error("Payment verification failed — signature mismatch. If you were charged, "
+                  "contact support with your payment ID: " + payment_id)
+        return
+    owner = order_owner(order_id)
+    if owner is None:
+        st.query_params.clear()
+        st.error("Payment verified but no matching order was found. Contact support with "
+                  "payment ID: " + payment_id)
+        return
+    if mark_order_paid(order_id, payment_id):
+        set_premium(owner["user_id"], True)
+        acct = get_user_by_id(owner["user_id"])
+        if acct is not None:
+            st.session_state["user"] = {"id": acct["id"], "username": acct["username"]}
+        st.query_params.clear()
+        st.session_state.pop("standard_checkout_order_id", None)
+        st.session_state["just_upgraded"] = True
+        st.rerun()
+    else:
+        st.query_params.clear()
 
 
 def handle_razorpay_return():
@@ -2374,6 +2543,7 @@ st.markdown(
 # session, and this restores the paying account's session directly so the
 # user isn't dropped back at the login screen right after paying.
 handle_razorpay_return()
+handle_razorpay_order_return()
 
 # ---- Auth gate: nothing below runs until the person is logged in ----------
 if "user" not in st.session_state:
@@ -2694,6 +2864,39 @@ else:
                 st.rerun()
 
     st.caption("Secured by Razorpay · UPI, cards, netbanking, and wallets accepted.")
+
+    # ---- Standard Checkout (embedded modal) — secondary/experimental option.
+    # Payment Links above is the reliable path; this satisfies Razorpay's
+    # generic "Standard Web Checkout" integration prompt for accounts where
+    # that matters, but it lives inside a sandboxed component iframe that
+    # testing showed can't reliably complete its post-payment redirect.
+    if RAZORPAY_CONFIGURED:
+        with st.expander("⚡ Standard Checkout (experimental — use Payment Link above if this doesn't work)"):
+            st.caption(
+                "This is Razorpay's embedded checkout modal. It may not complete the redirect back "
+                "to this app in every browser — if payment succeeds but nothing happens afterward, "
+                "use the Payment Link option above instead; it's the reliable path."
+            )
+            pending_order_id = st.session_state.get("standard_checkout_order_id")
+            if pending_order_id is None:
+                if st.button("Start Standard Checkout", use_container_width=True, key="start_standard_checkout"):
+                    try:
+                        order = razorpay_create_order_sdk(
+                            PREMIUM_PRICE_PAISE, receipt=f"user{user_id}-{secrets.token_hex(8)}"
+                        )
+                        record_order(user_id, order["id"], PREMIUM_PRICE_PAISE)
+                        st.session_state["standard_checkout_order_id"] = order["id"]
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Couldn't create order — Razorpay rejected the request: {e}")
+            else:
+                render_standard_checkout(
+                    pending_order_id, PREMIUM_PRICE_PAISE,
+                    form.get("name", ""), st.session_state["user"]["username"],
+                )
+                if st.button("Cancel", use_container_width=True, key="cancel_standard_checkout"):
+                    st.session_state.pop("standard_checkout_order_id", None)
+                    st.rerun()
 st.markdown("</div>", unsafe_allow_html=True)
 
 
