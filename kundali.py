@@ -1031,45 +1031,12 @@ def init_db():
         )
     """)
 
-    # ---- Migration: an older deployment may have created "users" before the
-    # email-verification columns were removed. CREATE TABLE IF NOT EXISTS
-    # above is a no-op on an existing table, so detect and fix it here
-    # instead of crashing on a missing column / stale NOT NULL constraint.
+    # ---- Migration: add username_lower if this DB predates that column.
     cols_info = conn.execute("PRAGMA table_info(users)").fetchall()
     existing_cols = {row["name"] for row in cols_info}
-    has_old_columns = "email" in existing_cols or "verified" in existing_cols
     missing_username_lower = "username_lower" not in existing_cols
 
-    if has_old_columns:
-        # Old schema had NOT NULL columns (e.g. email) we no longer populate,
-        # so patch that table won't work — rebuild it from scratch, keeping
-        # id/username/pw_hash/pw_salt/created_at from whatever accounts exist.
-        conn.execute("ALTER TABLE users RENAME TO users_old")
-        conn.execute("""
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL,
-                username_lower TEXT UNIQUE NOT NULL,
-                pw_hash TEXT NOT NULL,
-                pw_salt TEXT NOT NULL,
-                created_at REAL NOT NULL
-            )
-        """)
-        old_rows = conn.execute("SELECT * FROM users_old ORDER BY id").fetchall()
-        seen_lower = set()
-        for r in old_rows:
-            uname = r["username"]
-            uname_lower = uname.lower()
-            if uname_lower in seen_lower:
-                continue  # skip case-collision duplicates, keep the earliest account
-            seen_lower.add(uname_lower)
-            conn.execute(
-                "INSERT INTO users (id, username, username_lower, pw_hash, pw_salt, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (r["id"], uname, uname_lower, r["pw_hash"], r["pw_salt"], r["created_at"]),
-            )
-        conn.execute("DROP TABLE users_old")
-    elif missing_username_lower:
+    if missing_username_lower:
         conn.execute("ALTER TABLE users ADD COLUMN username_lower TEXT")
         conn.execute("UPDATE users SET username_lower = lower(username) WHERE username_lower IS NULL")
         dupes = conn.execute("""
@@ -1492,7 +1459,22 @@ def save_profile(user_id: int, name, dob_iso, tob_iso, city_name, city_region, l
     conn.close()
 
 
-init_db()
+@st.cache_resource
+def _init_db_once():
+    """Ensures init_db() — including all its schema migrations — runs exactly
+    once per running server process, not on every Streamlit rerun (which
+    happens on every click/keystroke). Running migrations repeatedly is not
+    just wasteful: a migration written to react to a column's mere presence
+    can misfire on every single rerun if that column later becomes a
+    legitimate permanent part of the schema, silently destroying data over
+    and over. st.cache_resource caches at the process level (unlike
+    st.session_state, which is per-session), so this guard holds across
+    every user and every interaction until the app actually restarts."""
+    init_db()
+    return True
+
+
+_init_db_once()
 
 
 # ============================================================
