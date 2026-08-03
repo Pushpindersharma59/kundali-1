@@ -28,16 +28,13 @@ import hmac
 import os
 import re
 import secrets
-import smtplib
 import sqlite3
 import time
 from datetime import datetime, timedelta, date, time as dtime
-from email.mime.text import MIMEText
 
 import streamlit as st
 import pandas as pd
 import requests
-import razorpay
 
 # ============================================================
 # ASTRONOMY ENGINE  (direct port of the JS math, same formulas)
@@ -796,7 +793,7 @@ HOUSE_CENTERS = [
 ]
 
 
-def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int) -> str:
+def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int, show_nakshatra: bool = False) -> str:
     by_house = [{"b": [], "t": []} for _ in range(12)]
     for x in birth_bodies:
         by_house[(x["sign"] - asc_sign + 12) % 12]["b"].append(x)
@@ -810,11 +807,18 @@ def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int) -> str:
         sub_fill = C["sindoor"] if kind == "t" else C["muted"]
         retro_mark = "℞" if (x["retro"] and x["key"] not in ("Ra", "Ke")) else ""
         deg = math.floor(x["inSign"])
+        nak_line = ""
+        if show_nakshatra and x["key"] != "As":
+            nak_abbr = NAK_ABBR[x["nakIdx"]]
+            nak_line = (
+                f'<tspan x="{cx}" dy="11" font-size="8.5" fill="{sub_fill}" '
+                f'font-family="Georgia, serif">{nak_abbr}</tspan>'
+            )
         return (
             f'<text x="{cx}" y="{y}" text-anchor="middle" font-size="14" font-weight="700" '
             f'fill="{fill}" font-family="Georgia, serif">{x["key"]}'
             f'<tspan font-size="10" fill="{sub_fill}" font-family="monospace">'
-            f' {deg}°{retro_mark}</tspan></text>'
+            f' {deg}°{retro_mark}</tspan>{nak_line}</text>'
         )
 
     parts = [
@@ -830,11 +834,11 @@ def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int) -> str:
         f'stroke-width="1" opacity="0.85" />',
     ]
 
+    step = 24 if show_nakshatra else 14
     for h, (cx, cy) in enumerate(HOUSE_CENTERS):
         sign_num = ((asc_sign + h) % 12) + 1
         b, t = by_house[h]["b"], by_house[h]["t"]
         n = len(b) + len(t)
-        step = 14
         start_y = cy - ((n - 1) * step) / 2 + 4
         parts.append(
             f'<text x="{cx}" y="{start_y - step - 2}" text-anchor="middle" font-size="10" '
@@ -976,32 +980,19 @@ def build_circular_svg_chart(birth_bodies, transit_bodies, asc_sign: int, asc_de
 # AUTH / DATABASE  — accounts (username + password only), saved profiles
 # ============================================================
 #
-# Storage: a local SQLite file. On a platform with ephemeral local disk
-# (e.g. Render's default app directory), writing next to the script means
-# every restart/redeploy silently wipes all data — payments, premium status,
-# saved profiles, everything. To avoid that trap, this defaults to a
-# persistent-disk mount at /var/data if one exists (Render: dashboard ->
-# your service -> Disks -> mount path /var/data), and only falls back to the
-# script's own directory if no such mount is present. You can still override
-# either behavior explicitly with the DB_DIR environment variable.
-# If you scale to multiple app instances behind a load balancer, swap
-# DB_PATH for a shared Postgres/MySQL connection string instead — the
+# Storage: a local SQLite file next to this script. Fine for a single-instance
+# deployment; if you scale to multiple app instances behind a load balancer,
+# swap DB_PATH for a shared Postgres/MySQL connection string instead — the
 # functions below are the only place that would need to change.
 #
 # No email is collected or required. Uniqueness is enforced on username only
 # (case-insensitive), so "PushpinderS" and "pushpinders" are the same account
 # and a second signup with either casing is rejected.
 
-_PERSISTENT_DISK_DIR = "/var/data"
-_DEFAULT_DB_DIR = (
-    _PERSISTENT_DISK_DIR
-    if os.path.isdir(_PERSISTENT_DISK_DIR)
-    else os.path.dirname(os.path.abspath(__file__))
-)
-DB_PATH = os.path.join(os.environ.get("DB_DIR", _DEFAULT_DB_DIR), "kundali_users.db")
+DB_PATH = os.path.join(os.environ.get("DB_DIR", os.path.dirname(os.path.abspath(__file__))), "kundali_users.db")
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def get_conn():
@@ -1032,12 +1023,45 @@ def init_db():
         )
     """)
 
-    # ---- Migration: add username_lower if this DB predates that column.
+    # ---- Migration: an older deployment may have created "users" before the
+    # email-verification columns were removed. CREATE TABLE IF NOT EXISTS
+    # above is a no-op on an existing table, so detect and fix it here
+    # instead of crashing on a missing column / stale NOT NULL constraint.
     cols_info = conn.execute("PRAGMA table_info(users)").fetchall()
     existing_cols = {row["name"] for row in cols_info}
+    has_old_columns = "email" in existing_cols or "verified" in existing_cols
     missing_username_lower = "username_lower" not in existing_cols
 
-    if missing_username_lower:
+    if has_old_columns:
+        # Old schema had NOT NULL columns (e.g. email) we no longer populate,
+        # so patch that table won't work — rebuild it from scratch, keeping
+        # id/username/pw_hash/pw_salt/created_at from whatever accounts exist.
+        conn.execute("ALTER TABLE users RENAME TO users_old")
+        conn.execute("""
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                username_lower TEXT UNIQUE NOT NULL,
+                pw_hash TEXT NOT NULL,
+                pw_salt TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+        """)
+        old_rows = conn.execute("SELECT * FROM users_old ORDER BY id").fetchall()
+        seen_lower = set()
+        for r in old_rows:
+            uname = r["username"]
+            uname_lower = uname.lower()
+            if uname_lower in seen_lower:
+                continue  # skip case-collision duplicates, keep the earliest account
+            seen_lower.add(uname_lower)
+            conn.execute(
+                "INSERT INTO users (id, username, username_lower, pw_hash, pw_salt, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (r["id"], uname, uname_lower, r["pw_hash"], r["pw_salt"], r["created_at"]),
+            )
+        conn.execute("DROP TABLE users_old")
+    elif missing_username_lower:
         conn.execute("ALTER TABLE users ADD COLUMN username_lower TEXT")
         conn.execute("UPDATE users SET username_lower = lower(username) WHERE username_lower IS NULL")
         dupes = conn.execute("""
@@ -1058,34 +1082,9 @@ def init_db():
     if "is_premium" not in cols_now:
         conn.execute("ALTER TABLE users ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0")
 
-    # ---- Migration: add email + email-verification columns for the new
-    # signup flow (real accounts, one per verified email). email_lower has a
-    # separate partial unique index (rather than an inline UNIQUE column)
-    # because ALTER TABLE ADD COLUMN can't add a UNIQUE constraint directly in
-    # SQLite, and a plain unique index still enforces "one account per email"
-    # going forward — the partial WHERE clause lets any pre-existing rows
-    # with no email (NULL) coexist without tripping the uniqueness check.
-    cols_now = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
-    if "email" not in cols_now:
-        conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
-    if "email_lower" not in cols_now:
-        conn.execute("ALTER TABLE users ADD COLUMN email_lower TEXT")
-    if "email_verified" not in cols_now:
-        conn.execute("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0")
-    if "verify_code" not in cols_now:
-        conn.execute("ALTER TABLE users ADD COLUMN verify_code TEXT")
-    if "verify_expires" not in cols_now:
-        conn.execute("ALTER TABLE users ADD COLUMN verify_expires REAL")
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower "
-        "ON users(email_lower) WHERE email_lower IS NOT NULL"
-    )
-
     # ---- Real-money payments ledger. razorpay_payment_id is UNIQUE so a
     # payment can only ever be applied once, even if the success redirect
     # somehow fires twice (double click, page refresh, browser back button).
-    # Superseded by payment_links below (kept for backward compatibility with
-    # any rows already written by an earlier deployment of this app).
     conn.execute("""
         CREATE TABLE IF NOT EXISTS payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1100,53 +1099,18 @@ def init_db():
         )
     """)
 
-    # ---- Payment Links ledger. Razorpay's embedded Checkout.js modal (the
-    # old flow) has to run inside Streamlit's sandboxed component iframe,
-    # which — confirmed by testing — blocks that widget from ever navigating
-    # or opening a new tab, automatically or even from a direct click. Razorpay
-    # Payment Links sidesteps this entirely: it's a plain hosted URL the app
-    # can link to normally (a real <a> in the main page, not inside any
-    # injected iframe), so the browser handles it exactly like clicking any
-    # other link — no sandbox involved. reference_id is UNIQUE so it can
-    # reliably map a completed payment back to the account that started it.
+    # ---- Daily free-tier usage counter: one row per (user, calendar date).
+    # Non-premium accounts are capped at FREE_DAILY_LIMIT chart generations
+    # per day; premium accounts are never checked against this table.
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS payment_links (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        CREATE TABLE IF NOT EXISTS chart_usage (
             user_id INTEGER NOT NULL,
-            plink_id TEXT NOT NULL,
-            reference_id TEXT UNIQUE NOT NULL,
-            razorpay_payment_id TEXT UNIQUE,
-            amount_paise INTEGER NOT NULL,
-            status TEXT NOT NULL DEFAULT 'created',
-            created_at REAL NOT NULL,
-            verified_at REAL
+            usage_date TEXT NOT NULL,
+            count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, usage_date),
+            FOREIGN KEY(user_id) REFERENCES users(id)
         )
     """)
-
-    # ---- Premium status, tracked independently of users.is_premium. Kept as
-    # its own small table (rather than a plain column) since this app went
-    # through a phase with session-scoped "guest" accounts that had no row in
-    # users at all — this table (formerly named guest_premium) works for any
-    # integer id regardless of whether it belongs to a real logged-in account.
-    # Existing data from that phase is preserved by migrating it forward.
-    existing_tables = {
-        row["name"] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
-    }
-    if "premium_status" not in existing_tables:
-        conn.execute("""
-            CREATE TABLE premium_status (
-                user_id INTEGER PRIMARY KEY,
-                is_premium INTEGER NOT NULL DEFAULT 0,
-                updated_at REAL
-            )
-        """)
-        if "guest_premium" in existing_tables:
-            conn.execute(
-                "INSERT INTO premium_status (user_id, is_premium, updated_at) "
-                "SELECT guest_id, is_premium, updated_at FROM guest_premium"
-            )
 
     conn.commit()
     conn.close()
@@ -1175,155 +1139,48 @@ def username_taken(username: str) -> bool:
     return row is not None
 
 
-def email_taken(email: str) -> bool:
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT 1 FROM users WHERE email_lower=?", (email.lower(),)
-    ).fetchone()
-    conn.close()
-    return row is not None
-
-
-def generate_verification_code() -> str:
-    return f"{secrets.randbelow(1_000_000):06d}"
-
-
-def create_user(username: str, password: str, email: str):
-    """Returns (ok, message, user_id, verify_code). user_id/verify_code are
-    None when ok is False. The new account starts with email_verified=0 and
-    a 15-minute verification code the caller is responsible for emailing."""
+def create_user(username: str, password: str):
+    """Returns (ok, message)."""
     conn = get_conn()
     pw_hash, pw_salt = hash_password(password)
-    code = generate_verification_code()
-    expires = time.time() + 15 * 60
     try:
-        cur = conn.execute(
-            "INSERT INTO users (username, username_lower, pw_hash, pw_salt, created_at, "
-            "email, email_lower, email_verified, verify_code, verify_expires) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
-            (username, username.lower(), pw_hash, pw_salt, time.time(),
-             email, email.lower(), code, expires),
+        conn.execute(
+            "INSERT INTO users (username, username_lower, pw_hash, pw_salt, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (username, username.lower(), pw_hash, pw_salt, time.time()),
         )
         conn.commit()
-        return True, "", cur.lastrowid, code
-    except sqlite3.IntegrityError as e:
-        if "email_lower" in str(e):
-            msg = "That email already has an account — log in instead, or use a different email."
-        else:
-            msg = "That username is already taken — pick another one."
-        return False, msg, None, None
+        return True, ""
+    except sqlite3.IntegrityError:
+        return False, "That username is already taken — pick another one."
     finally:
         conn.close()
 
 
-def verify_email_code(user_id: int, code: str):
-    """Returns (ok, message)."""
+def authenticate(username: str, password: str):
+    """Returns (user_dict_or_None, message)."""
     conn = get_conn()
     row = conn.execute(
-        "SELECT verify_code, verify_expires FROM users WHERE id=?", (user_id,)
-    ).fetchone()
-    if row is None:
-        conn.close()
-        return False, "Account not found."
-    if not row["verify_code"]:
-        conn.close()
-        return False, "No pending verification for this account."
-    if time.time() > (row["verify_expires"] or 0):
-        conn.close()
-        return False, "That code has expired — request a new one."
-    if code.strip() != row["verify_code"]:
-        conn.close()
-        return False, "Incorrect verification code."
-    conn.execute(
-        "UPDATE users SET email_verified=1, verify_code=NULL, verify_expires=NULL WHERE id=?",
-        (user_id,),
-    )
-    conn.commit()
-    conn.close()
-    return True, ""
-
-
-def resend_verification(user_id: int):
-    """Generates and stores a fresh code, returning (ok, message, email, username, code).
-    Fails clearly if this account has no email on file yet (e.g. an account
-    created before email verification existed), rather than silently
-    returning email=None and letting a later step crash trying to send to it."""
-    conn = get_conn()
-    row = conn.execute("SELECT email, username FROM users WHERE id=?", (user_id,)).fetchone()
-    if row is None:
-        conn.close()
-        return False, "Account not found.", None, None, None
-    if not row["email"]:
-        conn.close()
-        return False, "NO_EMAIL_ON_FILE", None, row["username"], None
-    code = generate_verification_code()
-    expires = time.time() + 15 * 60
-    conn.execute("UPDATE users SET verify_code=?, verify_expires=? WHERE id=?", (code, expires, user_id))
-    conn.commit()
-    conn.close()
-    return True, "", row["email"], row["username"], code
-
-
-def authenticate(identifier: str, password: str):
-    """Returns (user_dict_or_None, message). identifier can be a username or
-    an email address."""
-    conn = get_conn()
-    ident_lower = identifier.lower()
-    row = conn.execute(
-        "SELECT * FROM users WHERE username_lower=? OR email_lower=?", (ident_lower, ident_lower)
+        "SELECT * FROM users WHERE username_lower=?", (username.lower(),)
     ).fetchone()
     conn.close()
     if row is None:
-        return None, "No account with that username or email."
+        return None, "No account with that username."
     if not check_password(password, row["pw_salt"], row["pw_hash"]):
         return None, "Incorrect password."
     return dict(row), ""
 
 
-def get_user_by_id(user_id: int):
-    conn = get_conn()
-    row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
-def set_user_email(user_id: int, email: str):
-    """Attaches an email to an existing account that predates the email-
-    verification feature (so its email column is currently NULL). Returns
-    (ok, message). Enforces the same one-account-per-email uniqueness as
-    signup."""
-    conn = get_conn()
-    try:
-        conn.execute(
-            "UPDATE users SET email=?, email_lower=? WHERE id=?",
-            (email, email.lower(), user_id),
-        )
-        conn.commit()
-        return True, ""
-    except sqlite3.IntegrityError:
-        return False, "That email already has an account — use a different one."
-    finally:
-        conn.close()
-
-
 def is_premium(user_id: int) -> bool:
     conn = get_conn()
-    row = conn.execute("SELECT is_premium FROM premium_status WHERE user_id=?", (user_id,)).fetchone()
+    row = conn.execute("SELECT is_premium FROM users WHERE id=?", (user_id,)).fetchone()
     conn.close()
     return bool(row and row["is_premium"])
 
 
 def set_premium(user_id: int, value: bool = True):
     conn = get_conn()
-    conn.execute(
-        """
-        INSERT INTO premium_status (user_id, is_premium, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET
-            is_premium=excluded.is_premium, updated_at=excluded.updated_at
-        """,
-        (user_id, 1 if value else 0, time.time()),
-    )
+    conn.execute("UPDATE users SET is_premium=? WHERE id=?", (1 if value else 0, user_id))
     conn.commit()
     conn.close()
 
@@ -1381,59 +1238,37 @@ def order_owner(order_id: str):
     return dict(row) if row else None
 
 
-def record_payment_link(user_id: int, plink_id: str, reference_id: str, amount_paise: int):
+# ---- Free-tier daily chart-generation limit ---------------------------------
+FREE_DAILY_LIMIT = 3
+
+
+def get_today_usage_count(user_id: int) -> int:
     conn = get_conn()
+    today = date.today().isoformat()
+    row = conn.execute(
+        "SELECT count FROM chart_usage WHERE user_id=? AND usage_date=?", (user_id, today)
+    ).fetchone()
+    conn.close()
+    return row["count"] if row else 0
+
+
+def increment_usage(user_id: int) -> int:
+    """Increments today's counter for this user and returns the new count."""
+    conn = get_conn()
+    today = date.today().isoformat()
     conn.execute(
-        "INSERT INTO payment_links (user_id, plink_id, reference_id, amount_paise, status, created_at) "
-        "VALUES (?, ?, ?, ?, 'created', ?)",
-        (user_id, plink_id, reference_id, amount_paise, time.time()),
+        """
+        INSERT INTO chart_usage (user_id, usage_date, count) VALUES (?, ?, 1)
+        ON CONFLICT(user_id, usage_date) DO UPDATE SET count = count + 1
+        """,
+        (user_id, today),
     )
+    row = conn.execute(
+        "SELECT count FROM chart_usage WHERE user_id=? AND usage_date=?", (user_id, today)
+    ).fetchone()
     conn.commit()
     conn.close()
-
-
-def payment_link_already_verified(payment_id: str) -> bool:
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT 1 FROM payment_links WHERE razorpay_payment_id=? AND status='paid'", (payment_id,)
-    ).fetchone()
-    conn.close()
-    return row is not None
-
-
-def mark_payment_link_paid(reference_id: str, payment_id: str) -> bool:
-    """Attach the payment id to its link and flip it to paid. Returns False if this
-    link was already marked paid or the payment id was already used elsewhere
-    (both cases mean: don't grant premium again)."""
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT id, user_id, status FROM payment_links WHERE reference_id=?", (reference_id,)
-    ).fetchone()
-    if row is None or row["status"] == "paid":
-        conn.close()
-        return False
-    try:
-        conn.execute(
-            "UPDATE payment_links SET razorpay_payment_id=?, status='paid', verified_at=? WHERE id=?",
-            (payment_id, time.time(), row["id"]),
-        )
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
-        # payment_id already attached to a different link — replay attempt
-        conn.close()
-        return False
-    finally:
-        conn.close()
-
-
-def payment_link_owner(reference_id: str):
-    conn = get_conn()
-    row = conn.execute(
-        "SELECT user_id, amount_paise FROM payment_links WHERE reference_id=?", (reference_id,)
-    ).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    return row["count"] if row else 1
 
 
 def load_profile(user_id: int):
@@ -1460,275 +1295,82 @@ def save_profile(user_id: int, name, dob_iso, tob_iso, city_name, city_region, l
     conn.close()
 
 
-@st.cache_resource
-def _init_db_once():
-    """Ensures init_db() — including all its schema migrations — runs exactly
-    once per running server process, not on every Streamlit rerun (which
-    happens on every click/keystroke). Running migrations repeatedly is not
-    just wasteful: a migration written to react to a column's mere presence
-    can misfire on every single rerun if that column later becomes a
-    legitimate permanent part of the schema, silently destroying data over
-    and over. st.cache_resource caches at the process level (unlike
-    st.session_state, which is per-session), so this guard holds across
-    every user and every interaction until the app actually restarts."""
-    init_db()
-    return True
+init_db()
+
+# ---- Demo/reviewer account -------------------------------------------------
+# Payment gateways (Razorpay, etc.) often need to log in and click through the
+# live site during account activation review. Rather than share a real user's
+# password, seed one fixed, low-privilege account they can use. It behaves
+# exactly like any other account (own password hash, no special powers) —
+# nothing else in the app treats it differently.
+DEMO_USERNAME = "razorpay_demo"
+DEMO_PASSWORD = "Demo@12345"
 
 
-_init_db_once()
+def seed_demo_account():
+    if not username_taken(DEMO_USERNAME):
+        create_user(DEMO_USERNAME, DEMO_PASSWORD)
 
 
-# ============================================================
-# EMAIL — verification codes, via any standard SMTP provider
-# ============================================================
-#
-# Configure via environment variables (Render: your service -> Environment):
-#   SMTP_HOST=smtp.gmail.com          (or your provider's SMTP host)
-#   SMTP_PORT=587                     (587 for STARTTLS, the common default)
-#   SMTP_USER=you@example.com
-#   SMTP_PASSWORD=xxxxxxxxxxxxxxxx    (an app password, not your normal login
-#                                      password, for providers like Gmail)
-#   SMTP_FROM=you@example.com         (optional — defaults to SMTP_USER)
-#
-# Any SMTP-compatible provider works (Gmail with an App Password, Outlook,
-# Zoho, SendGrid's SMTP relay, Amazon SES SMTP, etc.) — just point these at
-# its host/port/credentials.
-
-SMTP_HOST = os.environ.get("SMTP_HOST", "")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587") or 587)
-SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
-SMTP_FROM = os.environ.get("SMTP_FROM", "") or SMTP_USER
-EMAIL_CONFIGURED = bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD)
-
-
-def send_verification_email(to_email: str, username: str, code: str):
-    """Returns (ok, message)."""
-    if not to_email:
-        return False, "No email address is on file for this account."
-    if not EMAIL_CONFIGURED:
-        return False, ("Email sending isn't configured on this deployment yet — "
-                        "set SMTP_HOST, SMTP_USER, and SMTP_PASSWORD as environment variables.")
-    body = (
-        f"Hi {username},\n\n"
-        f"Your Kuṇḍalī verification code is: {code}\n\n"
-        f"This code expires in 15 minutes. If you didn't request this, "
-        f"you can safely ignore this email.\n"
-    )
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = "Verify your Kuṇḍalī account"
-    msg["From"] = SMTP_FROM
-    msg["To"] = to_email
-    try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(SMTP_FROM, [to_email], msg.as_string())
-        return True, ""
-    except Exception as e:
-        return False, f"Couldn't send the verification email: {e}"
-
-
-def _send_code_and_enter_pending(user_id: int, email: str, username: str, code: str):
-    """Shared helper: sends the verification email and switches the auth
-    screen into its 'enter the code' mode for this account."""
-    ok, msg = send_verification_email(email, username, code)
-    st.session_state["pending_verification"] = {
-        "user_id": user_id, "email": email, "username": username,
-    }
-    if ok:
-        st.success(f"We've sent a 6-digit code to {email}. Enter it below to verify your account.")
-    else:
-        st.warning(
-            f"The verification email couldn't be sent ({msg}). "
-            f"Your code is: **{code}** — enter it below to continue "
-            f"(this is shown here only because email delivery isn't configured)."
-        )
+seed_demo_account()
 
 
 def render_auth_screen():
-    """Full-page login / signup flow, with a mandatory email-verification step
-    before an account can log in. Returns nothing — sets
+    """Full-page login / signup flow. Returns nothing — sets
     st.session_state['user'] and reruns once authenticated."""
     st.markdown(
-        f"""
-        <div style="text-align:center; padding: 18px 0 6px 0;">
-            <h1 style="color:{C["gold"]}; font-family:Georgia, serif; letter-spacing:0.06em; margin-bottom:2px;">
-                Kuṇḍalī
-            </h1>
-            <p class="kmuted" style="font-size:16px; margin-top:0;">
-                Your Vedic birth chart, saved securely to your account.
-            </p>
-        </div>
-        """,
+        f'<h1 style="color:{C["gold"]}; font-family:Georgia, serif; letter-spacing:0.06em;">Kuṇḍalī</h1>'
+        f'<p class="kmuted" style="margin-top:-10px; font-size:16px;">Sign in to save your birth details '
+        f'and come back to them anytime.</p>',
         unsafe_allow_html=True,
     )
 
-    center_l, center_m, center_r = st.columns([1, 1.3, 1])
+    tab_login, tab_signup = st.tabs(["Log in", "Sign up"])
 
-    with center_m:
-        pending = st.session_state.get("pending_verification")
-        needs_email = st.session_state.get("pending_email_needed")
-
-        # ---------------- Email-needed step (older accounts with no email on file) ----------------
-        if needs_email:
-            st.markdown(
-                f'<div class="kcard">'
-                f'<h4 style="margin-top:0;">✉️ Add an email to your account</h4>'
-                f'<p class="kmuted">Your account (<b>{needs_email["username"]}</b>) was created before '
-                f'email verification was required. Add an email address to continue — '
-                f"we'll send a code there to verify it.</p>",
-                unsafe_allow_html=True,
-            )
-            new_email = st.text_input("Email address", key="attach_email_input", placeholder="you@example.com")
-            ecol1, ecol2 = st.columns([1, 1])
-            with ecol1:
-                if st.button("Send verification code", use_container_width=True, key="attach_email_btn"):
-                    if not EMAIL_RE.match(new_email or ""):
-                        st.error("Enter a valid email address.")
-                    elif email_taken(new_email):
-                        st.error("That email already has an account — use a different one.")
-                    else:
-                        ok, msg = set_user_email(needs_email["user_id"], new_email.strip())
-                        if not ok:
-                            st.error(msg)
-                        else:
-                            ok2, rmsg, email, username, code = resend_verification(needs_email["user_id"])
-                            if ok2:
-                                st.session_state.pop("pending_email_needed", None)
-                                _send_code_and_enter_pending(needs_email["user_id"], email, username, code)
-                                st.rerun()
-                            else:
-                                st.error(rmsg)
-            with ecol2:
-                if st.button("← Back to log in / sign up", use_container_width=True, key="attach_email_back_btn"):
-                    st.session_state.pop("pending_email_needed", None)
+    with tab_login:
+        st.markdown('<div class="kcard" style="max-width:440px;">', unsafe_allow_html=True)
+        identifier = st.text_input("Username", key="login_identifier")
+        password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Log in", use_container_width=True):
+            if not identifier or not password:
+                st.error("Enter your username and password.")
+            else:
+                user, msg = authenticate(identifier.strip(), password)
+                if user:
+                    st.session_state["user"] = {"id": user["id"], "username": user["username"]}
                     st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-            return
-
-        # ---------------- Verification-code step ----------------
-        if pending:
-            st.markdown(
-                f'<div class="kcard">'
-                f'<h4 style="margin-top:0;">✉️ Verify your email</h4>'
-                f'<p class="kmuted">We sent a 6-digit code to <b>{pending["email"]}</b>. '
-                f'Enter it below — it expires in 15 minutes.</p>',
-                unsafe_allow_html=True,
-            )
-            code_input = st.text_input(
-                "Verification code", key="verify_code_input", max_chars=6,
-                placeholder="123456",
-            )
-            vcol1, vcol2 = st.columns([1, 1])
-            with vcol1:
-                if st.button("Verify & continue", use_container_width=True, key="verify_code_btn"):
-                    ok, msg = verify_email_code(pending["user_id"], (code_input or "").strip())
-                    if ok:
-                        st.session_state["user"] = {
-                            "id": pending["user_id"], "username": pending["username"],
-                        }
-                        st.session_state.pop("pending_verification", None)
-                        st.success("Email verified! Logging you in…")
-                        st.rerun()
-                    else:
-                        st.error(msg)
-            with vcol2:
-                if st.button("Resend code", use_container_width=True, key="resend_code_btn"):
-                    ok, msg, email, username, code = resend_verification(pending["user_id"])
-                    if ok:
-                        _send_code_and_enter_pending(pending["user_id"], email, username, code)
-                    elif msg == "NO_EMAIL_ON_FILE":
-                        st.session_state.pop("pending_verification", None)
-                        st.session_state["pending_email_needed"] = {
-                            "user_id": pending["user_id"], "username": username or pending["username"],
-                        }
-                        st.rerun()
-                    else:
-                        st.error(msg)
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("← Back to log in / sign up", key="verify_back_btn"):
-                st.session_state.pop("pending_verification", None)
-                st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-            return
-
-        # ---------------- Log in / sign up ----------------
-        if not EMAIL_CONFIGURED:
-            st.info(
-                "ℹ️ Email sending isn't configured on this deployment yet, so new signups "
-                "will show their verification code directly on-screen instead of by email. "
-                "Set SMTP_HOST / SMTP_USER / SMTP_PASSWORD to enable real email delivery."
-            )
-
-        tab_login, tab_signup = st.tabs(["🔐 Log in", "✨ Create account"])
-
-        with tab_login:
-            st.markdown('<div class="kcard">', unsafe_allow_html=True)
-            identifier = st.text_input("Username or email", key="login_identifier")
-            password = st.text_input("Password", type="password", key="login_password")
-            if st.button("Log in", use_container_width=True, key="login_btn"):
-                if not identifier or not password:
-                    st.error("Enter your username/email and password.")
                 else:
-                    user, msg = authenticate(identifier.strip(), password)
-                    if user is None:
-                        st.error(msg)
-                    elif not user["email_verified"]:
-                        if not user.get("email"):
-                            # Account predates the email-verification feature —
-                            # there's no address to send a code to yet.
-                            st.session_state["pending_email_needed"] = {
-                                "user_id": user["id"], "username": user["username"],
-                            }
-                            st.rerun()
-                        else:
-                            ok, rmsg, email, username, code = resend_verification(user["id"])
-                            if ok:
-                                _send_code_and_enter_pending(user["id"], email, username, code)
-                                st.rerun()
-                            else:
-                                st.error(rmsg)
-                    else:
-                        st.session_state["user"] = {"id": user["id"], "username": user["username"]}
-                        st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
+                    st.error(msg)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        with tab_signup:
-            st.markdown('<div class="kcard">', unsafe_allow_html=True)
-            su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
-            su_email = st.text_input("Email address", key="su_email", placeholder="you@example.com")
-            su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
-            su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
-            su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
-            st.caption("Only one account can be created per email address.")
-            if st.button("Create account", use_container_width=True, key="signup_btn"):
-                errors = []
-                if not USERNAME_RE.match(su_username or ""):
-                    errors.append("Username must be 3-20 characters: letters, numbers, underscore only.")
-                elif username_taken(su_username):
-                    errors.append("That username is already taken — pick another one.")
-                if not EMAIL_RE.match(su_email or ""):
-                    errors.append("Enter a valid email address.")
-                elif email_taken(su_email):
-                    errors.append("That email already has an account — log in instead, or use a different email.")
-                if len(su_pw or "") < 8:
-                    errors.append("Password must be at least 8 characters.")
-                if su_pw != su_pw2:
-                    errors.append("Passwords don't match.")
-                if not su_terms:
-                    errors.append("You must agree to the Terms of Service and Privacy Policy.")
-                if errors:
-                    for e in errors:
-                        st.error(e)
+    with tab_signup:
+        st.markdown('<div class="kcard" style="max-width:440px;">', unsafe_allow_html=True)
+        su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
+        su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
+        su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
+        su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
+        if st.button("Create account", use_container_width=True):
+            errors = []
+            if not USERNAME_RE.match(su_username or ""):
+                errors.append("Username must be 3-20 characters: letters, numbers, underscore only.")
+            elif username_taken(su_username):
+                errors.append("That username is already taken — pick another one.")
+            if len(su_pw or "") < 8:
+                errors.append("Password must be at least 8 characters.")
+            if su_pw != su_pw2:
+                errors.append("Passwords don't match.")
+            if not su_terms:
+                errors.append("You must agree to the Terms of Service and Privacy Policy.")
+            if errors:
+                for e in errors:
+                    st.error(e)
+            else:
+                ok, msg = create_user(su_username.strip(), su_pw)
+                if not ok:
+                    st.error(msg)
                 else:
-                    ok, msg, new_user_id, code = create_user(su_username.strip(), su_pw, su_email.strip())
-                    if not ok:
-                        st.error(msg)
-                    else:
-                        _send_code_and_enter_pending(new_user_id, su_email.strip(), su_username.strip(), code)
-                        st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
+                    st.success("Account created — you can log in now.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ============================================================
@@ -1757,6 +1399,10 @@ NAKSHATRAS_ASCII = [
     "Uttara Ashadha", "Shravana", "Dhanishtha", "Shatabhisha", "Purva Bhadrapada",
     "Uttara Bhadrapada", "Revati",
 ]
+
+NAK_ABBR_ASCII = ["Aswi", "Bhar", "Krit", "Rohi", "Mrig", "Ardr", "Puna", "Push", "Asle",
+                  "Magh", "PPha", "UPha", "Hast", "Chit", "Swat", "Visa", "Anur", "Jyes",
+                  "Mula", "PAsh", "UAsh", "Shra", "Dhan", "Shat", "PBha", "UBha", "Reva"]
 
 TITHIS_ASCII = ["Pratipada", "Dvitiya", "Tritiya", "Chaturthi", "Panchami", "Shashthi",
                 "Saptami", "Ashtami", "Navami", "Dashami", "Ekadashi", "Dwadashi",
@@ -1816,26 +1462,15 @@ HOUSE_FRACS = [
 ]
 
 
-def draw_diamond_chart_pdf(pdf, bodies, transit_bodies, asc_sign: int, asc_body: dict, x0: float, y0: float, size: float):
-    """Draws a North-Indian diamond Rasi chart directly with fpdf2's vector
-    primitives (no external image/rasterizer needed), styled to match the
-    on-screen SVG chart: gold border/diagonals over a soft cream fill, the
-    Ascendant labeled in blue, birth-planet lines in black, and transit-planet
-    lines in red — same palette and layout as build_svg_chart()."""
-    GOLD = (184, 132, 46)
-    IVORY = (58, 46, 31)
-    SINDOOR = (196, 70, 43)
-    MOON = (58, 91, 140)
-    MUTED = (122, 111, 92)
-    BG = (255, 249, 224)
-
+def draw_diamond_chart_pdf(pdf, bodies, asc_sign: int, asc_body: dict, x0: float, y0: float, size: float):
+    """Draws a real North-Indian diamond Rasi chart directly with fpdf2's vector
+    primitives (no external image/rasterizer needed)."""
     x1, y1 = x0 + size, y0 + size
     midx, midy = x0 + size / 2, y0 + size / 2
 
-    pdf.set_fill_color(*BG)
-    pdf.set_draw_color(*GOLD)
+    pdf.set_draw_color(184, 132, 46)
     pdf.set_line_width(0.5)
-    pdf.rect(x0, y0, size, size, style="DF")
+    pdf.rect(x0, y0, size, size)
     pdf.line(x0, y0, x1, y1)
     pdf.line(x1, y0, x0, y1)
     pdf.set_line_width(0.35)
@@ -1844,49 +1479,39 @@ def draw_diamond_chart_pdf(pdf, bodies, transit_bodies, asc_sign: int, asc_body:
     pdf.line(midx, y1, x0, midy)
     pdf.line(x0, midy, midx, y0)
 
-    by_house_birth = [[] for _ in range(12)]
+    by_house = [[] for _ in range(12)]
     for b in bodies:
         if b["key"] == "As":
             continue
-        by_house_birth[(b["sign"] - asc_sign + 12) % 12].append(b)
-
-    by_house_transit = [[] for _ in range(12)]
-    for b in (transit_bodies or []):
-        if b["key"] == "As":
-            continue
-        by_house_transit[(b["sign"] - asc_sign + 12) % 12].append(b)
+        by_house[(b["sign"] - asc_sign + 12) % 12].append(b)
 
     for h, (fx, fy) in enumerate(HOUSE_FRACS):
         cx, cy = x0 + fx * size, y0 + fy * size
         sign_num = ((asc_sign + h) % 12) + 1
-
-        lines = []  # (text, color) pairs
+        lines = []
         if h == 0:
-            lines.append((f'As {int(asc_body["inSign"])}\u00b0', MOON))
-        for b in by_house_birth[h]:
+            lines.append(f'As {int(asc_body["inSign"])}\u00b0')
+        for b in by_house[h]:
             deg = int(b["inSign"])
             retro = "R" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
-            lines.append((f'{_ascii_key(b["key"])} {deg}\u00b0{retro}', IVORY))
-        for b in by_house_transit[h]:
-            deg = int(b["inSign"])
-            retro = "R" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
-            lines.append((f'{_ascii_key(b["key"])} {deg}\u00b0{retro}', SINDOOR))
+            nak_abbr = NAK_ABBR_ASCII[b["nakIdx"]]
+            lines.append(f'{_ascii_key(b["key"])} {deg}\u00b0{retro} {nak_abbr}')
 
         block_h = len(lines) * 4.2
         pdf.set_font("Helvetica", "", 7)
-        pdf.set_text_color(*MUTED)
+        pdf.set_text_color(122, 111, 92)
         pdf.text(cx - 3, cy - block_h / 2 - 3, str(sign_num))
 
         ty = cy - block_h / 2
-        for line, color in lines:
-            pdf.set_font("Helvetica", "B", 8)
-            pdf.set_text_color(*color)
-            pdf.set_xy(cx - 16, ty)
-            pdf.cell(32, 4.2, line, align="C")
+        for line in lines:
+            pdf.set_font("Helvetica", "B", 7)
+            pdf.set_text_color(196, 70, 43) if (line.startswith("As ")) else pdf.set_text_color(58, 46, 31)
+            pdf.set_xy(cx - 20, ty)
+            pdf.cell(40, 4.2, line, align="C")
             ty += 4.2
 
 
-def generate_kundali_pdf_bytes(birth_chart, transit_chart, form) -> bytes:
+def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
     GOLD, IVORY, SINDOOR, MUTED = (184, 132, 46), (58, 46, 31), (196, 70, 43), (122, 111, 92)
     LINE, PANEL_SOFT, WHITE = (222, 196, 120), (255, 243, 176), (255, 253, 231)
 
@@ -1894,7 +1519,6 @@ def generate_kundali_pdf_bytes(birth_chart, transit_chart, form) -> bytes:
     b_moon = next(b for b in birth_chart["bodies"] if b["key"] == "Mo")
     pan = birth_chart["panchanga"]
     core_bodies = [b for b in birth_chart["bodies"] if b["key"] in CORE_KEYS]
-    core_transit_bodies = [b for b in transit_chart["bodies"] if b["key"] in CORE_KEYS]
     paksha_ascii, tithi_ascii = _tithi_ascii(pan)
     karana_ascii = KARANA_ASCII_MAP.get(pan["karana"], pan["karana"])
 
@@ -1978,12 +1602,11 @@ def generate_kundali_pdf_bytes(birth_chart, transit_chart, form) -> bytes:
     chart_size = 130
     x0 = (210 - chart_size) / 2
     y0 = pdf.get_y() + 2
-    draw_diamond_chart_pdf(pdf, core_bodies, core_transit_bodies, b_asc["sign"], b_asc, x0, y0, chart_size)
+    draw_diamond_chart_pdf(pdf, core_bodies, b_asc["sign"], b_asc, x0, y0, chart_size)
     pdf.set_y(y0 + chart_size + 5)
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(*MUTED)
-    pdf.cell(0, 5, "Houses are fixed to the birth lagna. Black = birth, Red = transit (now). R = retrograde.",
-              ln=True, align="C")
+    pdf.cell(0, 5, "Houses are fixed to the birth lagna. R = retrograde.", ln=True, align="C")
 
     # ---------------- Page 2: Panchanga + Chara Karaka ----------------
     pdf.add_page()
@@ -2198,15 +1821,12 @@ def generate_kundali_html_report(birth_chart, form) -> str:
 
 
 # ============================================================
-# RAZORPAY — real payments only. No test/dummy payment bypass in production.
+# RAZORPAY — real payments (+ automatic Test Mode when unconfigured)
 # ============================================================
 #
 # Reads credentials from environment variables. On Render: your service ->
 # Environment -> add RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, APP_BASE_URL.
-# Use the rzp_test_... keys first end-to-end in a private/staging deployment,
-# then switch to rzp_live_... for the public site. This app no longer ships
-# an automatic "test mode" fallback or a simulated/dummy payment button —
-# every checkout on the live site goes through real Razorpay verification.
+# Use the rzp_test_... keys first end-to-end before switching to rzp_live_....
 
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
@@ -2216,177 +1836,133 @@ PREMIUM_PRICE_PAISE = PREMIUM_PRICE_INR * 100
 
 RAZORPAY_CONFIGURED = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET and APP_BASE_URL)
 
-# Official SDK client, used for the Standard Checkout (embedded modal) path
-# below. requires `pip install razorpay` in requirements.txt.
-_razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)) if RAZORPAY_CONFIGURED else None
+# True when real Razorpay Test Mode keys (rzp_test_...) are configured, as opposed to
+# live keys (rzp_live_...) or no keys at all. Test Mode still opens the REAL Razorpay
+# checkout — it just needs Razorpay's own dummy/test payment credentials, not real ones.
+RAZORPAY_TEST_KEY = RAZORPAY_KEY_ID.startswith("rzp_test_")
+
+# ---- Test mode: lets you exercise the ENTIRE premium flow (order created,
+# payment "completes", the same DB writes a real payment would trigger,
+# premium flag flips, report unlocks) without any real money moving and
+# without needing Razorpay keys at all. Controlled by one environment
+# variable so it can never accidentally stay on in production:
+#   - If RAZORPAY_KEY_ID/SECRET/APP_BASE_URL are NOT all set, test mode
+#     turns on automatically (there's no way to charge a real card anyway).
+#   - Once you add real Razorpay keys on Render, RAZORPAY_CONFIGURED becomes
+#     True and test mode turns itself off automatically.
+#   - PAYMENT_TEST_MODE=1 forces test mode on even with real keys present,
+#     for staging. Never set this on a production deployment that takes
+#     real customer payments.
+PAYMENT_TEST_MODE = (
+    os.environ.get("PAYMENT_TEST_MODE", "").strip().lower() in ("1", "true", "yes")
+    or not RAZORPAY_CONFIGURED
+)
 
 
-def razorpay_create_payment_link(amount_paise: int, reference_id: str, callback_url: str, customer_name: str = "") -> dict:
-    """Creates a Razorpay Payment Link server-side (using the secret key, never
-    exposed to the browser). Returns a dict including 'id' (the link id) and
-    'short_url' (the actual hosted payment page — a real URL the app can send
-    the user to directly, with no iframe/embedding involved on our side at
-    all). Raises requests.HTTPError on failure."""
-    body = {
-        "amount": amount_paise,
-        "currency": "INR",
-        "accept_partial": False,
-        "description": "Premium Kundali report",
-        "reference_id": reference_id,
-        "callback_url": callback_url,
-        "callback_method": "get",
-        "reminder_enable": False,
-        "notify": {"sms": False, "email": False},
-    }
-    if customer_name:
-        body["customer"] = {"name": customer_name}
+def razorpay_create_order(amount_paise: int, receipt: str) -> dict:
+    """Creates a Razorpay Order server-side (using the secret key, never exposed to
+    the browser). Raises requests.HTTPError on failure."""
     resp = requests.post(
-        "https://api.razorpay.com/v1/payment_links",
+        "https://api.razorpay.com/v1/orders",
         auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
-        json=body,
+        json={
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": receipt,
+            "payment_capture": 1,  # auto-capture on successful payment
+        },
         timeout=15,
     )
     resp.raise_for_status()
     return resp.json()
 
 
-def razorpay_verify_link_signature(plink_id: str, reference_id: str, status: str, payment_id: str, signature: str) -> bool:
-    """Razorpay Payment Links signature check: HMAC-SHA256 of
-    'payment_link_id|payment_link_reference_id|payment_link_status|razorpay_payment_id'
-    using the account's key secret. This is what proves the callback actually
-    came from a completed Razorpay payment and wasn't just typed into the
-    URL bar."""
-    msg = f"{plink_id}|{reference_id}|{status}|{payment_id}".encode("utf-8")
+def razorpay_verify_signature(order_id: str, payment_id: str, signature: str) -> bool:
+    """Standard Razorpay Checkout signature check: HMAC-SHA256 of
+    'order_id|payment_id' using the account's key secret. This is what proves
+    the success callback actually came from a completed Razorpay payment and
+    wasn't just typed into the URL bar."""
+    msg = f"{order_id}|{payment_id}".encode("utf-8")
     expected = hmac.new(RAZORPAY_KEY_SECRET.encode("utf-8"), msg, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
 
 
-# ============================================================
-# STANDARD CHECKOUT (embedded Checkout.js modal) — official SDK version.
-# ============================================================
-#
-# Added on request to match Razorpay's generic "Standard Web Checkout"
-# integration prompt. Kept as an ADDITIONAL option alongside Payment Links
-# above, not a replacement: direct testing in this app's actual deployment
-# confirmed that Streamlit renders this modal inside a sandboxed iframe that
-# blocks it from completing its post-payment redirect — neither
-# window.top.location.href nor window.open() could escape it from a click,
-# let alone automatically. Payment Links (above) sidesteps that entirely and
-# is the reliable path; this is offered as a secondary/experimental option
-# since it may behave differently in some browsers, and to satisfy Razorpay's
-# dashboard integration checklist if that turns out to matter for your
-# account. The UI below labels it accordingly.
-
-def razorpay_create_order_sdk(amount_paise: int, receipt: str) -> dict:
-    """Creates a Razorpay Order via the official SDK (server-side, secret key
-    never exposed to the browser). Raises on failure."""
-    return _razorpay_client.order.create({
-        "amount": amount_paise,
-        "currency": "INR",
-        "receipt": receipt,
-        "payment_capture": 1,
-    })
-
-
-def razorpay_verify_order_signature_sdk(order_id: str, payment_id: str, signature: str) -> bool:
-    """Standard Checkout signature check via the official SDK: HMAC-SHA256 of
-    'order_id|payment_id' using the account's key secret — same algorithm
-    Razorpay's own integration docs describe. Returns False on mismatch
-    instead of letting the SDK's exception propagate."""
-    try:
-        _razorpay_client.utility.verify_payment_signature({
-            "razorpay_order_id": order_id,
-            "razorpay_payment_id": payment_id,
-            "razorpay_signature": signature,
-        })
-        return True
-    except razorpay.errors.SignatureVerificationError:
-        return False
-
-
-def render_standard_checkout(order_id: str, amount_paise: int, user_name: str, username: str):
-    """Opens the Razorpay Checkout modal once checkout.js has finished
-    loading, and on success shows a 'Continue' button that attempts both an
-    automatic redirect and a click-triggered new tab — whichever the
-    browser's sandbox permits, if either."""
+def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, username: str):
+    """Opens the Razorpay Checkout modal immediately and, on success, redirects the
+    top-level browser back to this app with the payment proof in the query string
+    so Streamlit can verify it server-side on the next run. Kept short (120px)
+    because the actual payment UI is Razorpay's own overlay/popup, not something
+    that needs a tall embedded frame — a tall frame here just leaves a big blank
+    gap on the page while checkout is idle or fails silently."""
     success_url = f"{APP_BASE_URL}/?rzp_order_id={order_id}"
     st.components.v1.html(
         f"""
-        <div id="rzp-std-status" style="font-family:Georgia, serif; color:#7A6F5C; padding:10px 0; font-size:14px;">
+        <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+        <div id="rzp-status" style="font-family:Georgia, serif; color:#7A6F5C; padding:10px 0; font-size:14px;">
             Opening secure Razorpay checkout…
         </div>
         <script>
-        (function () {{
-            var script = document.createElement("script");
-            script.src = "https://checkout.razorpay.com/v1/checkout.js";
-            script.onload = function () {{
-                try {{
-                    var options = {{
-                        "key": "{RAZORPAY_KEY_ID}",
-                        "amount": "{amount_paise}",
-                        "currency": "INR",
-                        "name": "Kuṇḍalī",
-                        "description": "Premium Kundali report",
-                        "order_id": "{order_id}",
-                        "prefill": {{ "name": "{user_name or username}" }},
-                        "theme": {{ "color": "#B8842E" }},
-                        "handler": function (response) {{
-                            var url = "{success_url}"
-                                + "&rzp_payment_id=" + encodeURIComponent(response.razorpay_payment_id)
-                                + "&rzp_signature=" + encodeURIComponent(response.razorpay_signature);
-                            var statusEl = document.getElementById("rzp-std-status");
-                            statusEl.innerHTML =
-                                '<div style="color:#1e7e34; font-weight:700; margin-bottom:10px;">'
-                                + '✅ Payment successful!</div>'
-                                + '<button id="rzp-std-continue-btn" style="background:#B8842E; color:#fff; '
-                                + 'border:none; border-radius:6px; padding:10px 20px; font-size:14px; '
-                                + 'font-family:Georgia, serif; cursor:pointer;">Continue →</button>'
-                                + '<div style="margin-top:8px; font-size:12px; color:#7A6F5C;">'
-                                + \"If clicking doesn't do anything, use the Payment Link option instead.</div>\";
-                            document.getElementById("rzp-std-continue-btn").onclick = function () {{
-                                try {{ window.open(url, "_blank"); }} catch (e) {{}}
-                                try {{ window.top.location.href = url; }} catch (e) {{}}
-                            }};
-                            try {{ window.open(url, "_blank"); }} catch (e) {{}}
-                            try {{ window.top.location.href = url; }} catch (e) {{}}
-                        }},
-                        "modal": {{
-                            "ondismiss": function () {{
-                                document.getElementById("rzp-std-status").innerText =
-                                    "Checkout closed.";
-                            }}
-                        }}
-                    }};
-                    var rzp = new Razorpay(options);
-                    rzp.on('payment.failed', function (response) {{
-                        document.getElementById("rzp-std-status").innerText =
-                            "Payment failed: " + response.error.description;
-                    }});
-                    rzp.open();
-                }} catch (e) {{
-                    document.getElementById("rzp-std-status").innerText =
-                        "Couldn't open Razorpay checkout: " + e.message;
+        try {{
+            var options = {{
+                "key": "{RAZORPAY_KEY_ID}",
+                "amount": "{amount_paise}",
+                "currency": "INR",
+                "name": "Kuṇḍalī",
+                "description": "Premium Kundali report",
+                "order_id": "{order_id}",
+                "prefill": {{ "name": "{user_name or username}" }},
+                "theme": {{ "color": "#B8842E" }},
+                "handler": function (response) {{
+                    var url = "{success_url}"
+                        + "&rzp_payment_id=" + encodeURIComponent(response.razorpay_payment_id)
+                        + "&rzp_signature=" + encodeURIComponent(response.razorpay_signature);
+                    window.top.location.href = url;
+                }},
+                "modal": {{
+                    "ondismiss": function () {{
+                        document.getElementById("rzp-status").innerText =
+                            "Checkout closed — click 'Reopen payment window' below to retry.";
+                    }}
                 }}
             }};
-            script.onerror = function () {{
-                document.getElementById("rzp-std-status").innerText =
-                    "Couldn't load the Razorpay checkout script.";
-            }};
-            document.body.appendChild(script);
-        }})();
+            var rzp = new Razorpay(options);
+            rzp.on('payment.failed', function (response) {{
+                document.getElementById("rzp-status").innerText =
+                    "Payment failed: " + response.error.description;
+            }});
+            rzp.open();
+        }} catch (e) {{
+            document.getElementById("rzp-status").innerText =
+                "Couldn't open Razorpay checkout: " + e.message;
+        }}
         </script>
         """,
-        height=700,
-        scrolling=True,
+        height=120,
     )
 
 
-def handle_razorpay_order_return():
-    """Standard-Checkout counterpart to handle_razorpay_return() (which
-    handles Payment Links). Same pattern: verify the signature, credit the
-    right account (looked up from the payments ledger via order_id, not
-    from whoever's logged into this fresh post-redirect session), and
-    restore that account's session directly."""
+def simulate_test_payment(user_id: int, amount_paise: int) -> bool:
+    """Test-mode stand-in for the real Razorpay round trip. Creates a synthetic
+    order + payment id (clearly prefixed 'test_' so they can never collide with
+    or be mistaken for real Razorpay ids), writes them through the exact same
+    payments-ledger functions the real flow uses, then flips is_premium. No
+    network call, no Razorpay checkout, no money movement of any kind."""
+    order_id = f"test_order_{secrets.token_hex(10)}"
+    payment_id = f"test_pay_{secrets.token_hex(10)}"
+    record_order(user_id, order_id, amount_paise)
+    ok = mark_order_paid(order_id, payment_id)
+    if ok:
+        set_premium(user_id, True)
+    return ok
+
+
+def handle_razorpay_return():
+    """Runs on every rerun, before anything else, so a payment redirect is verified
+    and applied exactly once even if the page is refreshed afterwards. Deliberately
+    does NOT depend on st.session_state['user'] being present — a full-page
+    redirect back from Razorpay can land in a fresh browser session, so the
+    account to credit comes from the payments ledger (order_owner), not from
+    whoever happens to be logged in on this particular run."""
     params = st.query_params
     order_id = params.get("rzp_order_id")
     payment_id = params.get("rzp_payment_id")
@@ -2394,14 +1970,9 @@ def handle_razorpay_order_return():
     if not (order_id and payment_id and signature):
         return
     if payment_already_verified(payment_id):
-        owner = order_owner(order_id)
-        if owner is not None:
-            acct = get_user_by_id(owner["user_id"])
-            if acct is not None:
-                st.session_state["user"] = {"id": acct["id"], "username": acct["username"]}
         st.query_params.clear()
         return
-    if not razorpay_verify_order_signature_sdk(order_id, payment_id, signature):
+    if not razorpay_verify_signature(order_id, payment_id, signature):
         st.query_params.clear()
         st.error("Payment verification failed — signature mismatch. If you were charged, "
                   "contact support with your payment ID: " + payment_id)
@@ -2414,66 +1985,9 @@ def handle_razorpay_order_return():
         return
     if mark_order_paid(order_id, payment_id):
         set_premium(owner["user_id"], True)
-        acct = get_user_by_id(owner["user_id"])
-        if acct is not None:
-            st.session_state["user"] = {"id": acct["id"], "username": acct["username"]}
         st.query_params.clear()
-        st.session_state.pop("standard_checkout_order_id", None)
-        st.session_state["just_upgraded"] = True
-        st.rerun()
-    else:
-        st.query_params.clear()
-
-
-def handle_razorpay_return():
-    """Runs on every rerun, before anything else (even before the login gate),
-    so a payment redirect is verified and applied exactly once even if the
-    page is refreshed afterwards. A full-page redirect back from Razorpay's
-    hosted Payment Link page always lands in a brand-new Streamlit session —
-    which, without this, would just show the login screen again, stranding
-    the user after a successful payment. So this restores the paying
-    account's real session directly (looked up from the payment_links
-    ledger via reference_id, which we generated and control), bypassing the
-    login form for this one redirect."""
-    params = st.query_params
-    plink_id = params.get("razorpay_payment_link_id")
-    reference_id = params.get("razorpay_payment_link_reference_id")
-    status = params.get("razorpay_payment_link_status")
-    payment_id = params.get("razorpay_payment_id")
-    signature = params.get("razorpay_signature")
-    if not (plink_id and reference_id and status and payment_id and signature):
-        return
-    if payment_link_already_verified(payment_id):
-        owner = payment_link_owner(reference_id)
-        if owner is not None:
-            acct = get_user_by_id(owner["user_id"])
-            if acct is not None:
-                st.session_state["user"] = {"id": acct["id"], "username": acct["username"]}
-        st.query_params.clear()
-        return
-    if not razorpay_verify_link_signature(plink_id, reference_id, status, payment_id, signature):
-        st.query_params.clear()
-        st.error("Payment verification failed — signature mismatch. If you were charged, "
-                  "contact support with your payment ID: " + payment_id)
-        return
-    if status != "paid":
-        st.query_params.clear()
-        st.info("Payment was not completed (status: " + status + "). You can try again below.")
-        return
-    owner = payment_link_owner(reference_id)
-    if owner is None:
-        st.query_params.clear()
-        st.error("Payment verified but no matching order was found. Contact support with "
-                  "payment ID: " + payment_id)
-        return
-    if mark_payment_link_paid(reference_id, payment_id):
-        set_premium(owner["user_id"], True)
-        acct = get_user_by_id(owner["user_id"])
-        if acct is not None:
-            st.session_state["user"] = {"id": acct["id"], "username": acct["username"]}
-        st.query_params.clear()
-        st.session_state.pop("premium_link_url", None)
-        st.session_state.pop("premium_link_reference_id", None)
+        st.session_state.pop("checkout_order_id", None)
+        st.session_state.pop("checkout_rendered_for", None)
         st.session_state["just_upgraded"] = True
         st.rerun()
     else:
@@ -2538,18 +2052,22 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---- Payment-redirect handling must run before the login gate: a full-page
-# redirect back from Razorpay always lands in a brand-new (logged-out)
-# session, and this restores the paying account's session directly so the
-# user isn't dropped back at the login screen right after paying.
-handle_razorpay_return()
-handle_razorpay_order_return()
-
 # ---- Auth gate: nothing below runs until the person is logged in ----------
+# A direct "?preview=1" link auto-signs in as the fixed demo account above —
+# handy for a payment-gateway reviewer who'd rather click a link than type
+# credentials. Regular visitors without that query param still see the normal
+# login/signup screen; nothing about the auth flow itself changes.
+if "user" not in st.session_state and st.query_params.get("preview") == "1":
+    demo_user, _ = authenticate(DEMO_USERNAME, DEMO_PASSWORD)
+    if demo_user:
+        st.session_state["user"] = {"id": demo_user["id"], "username": demo_user["username"]}
+        st.rerun()
+
 if "user" not in st.session_state:
     render_auth_screen()
     st.stop()
 
+handle_razorpay_return()
 if st.session_state.pop("just_upgraded", False):
     st.success("Payment verified — premium unlocked! 🎉")
 
@@ -2563,24 +2081,18 @@ with topbar_l:
 with topbar_r:
     st.markdown("<br>", unsafe_allow_html=True)
     premium_badge = " · ⭐ Premium" if is_premium(st.session_state["user"]["id"]) else ""
-    st.markdown(
-        f'<p class="kmuted" style="text-align:right;">Signed in as '
-        f'<b>{st.session_state["user"]["username"]}</b>{premium_badge}</p>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(f'<p class="kmuted" style="text-align:right;">Signed in as <b>{st.session_state["user"]["username"]}</b>{premium_badge}</p>', unsafe_allow_html=True)
     if st.button("Log out", use_container_width=True):
         del st.session_state["user"]
         st.session_state.pop("form", None)
         st.rerun()
 
-
-
-if not RAZORPAY_CONFIGURED:
+if PAYMENT_TEST_MODE:
     st.markdown(
         '<div style="background:#FCE8E6;border:1px solid #D93025;border-radius:8px;'
         'padding:8px 16px;margin-bottom:14px;color:#D93025;font-size:14px;font-weight:600;">'
-        '⚠️ Payments are not yet configured on this deployment. Set RAZORPAY_KEY_ID, '
-        'RAZORPAY_KEY_SECRET, and APP_BASE_URL as environment variables to enable premium checkout.'
+        '🧪 TEST MODE — payments are simulated. No real money moves. '
+        'Add real Razorpay keys (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, APP_BASE_URL) to go live.'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -2677,8 +2189,27 @@ with col5:
 
 st.markdown("</div>", unsafe_allow_html=True)
 
+# ---- Free-tier daily chart-generation limit --------------------------------
+_user_id_for_limit = st.session_state["user"]["id"]
+_premium_for_limit = is_premium(_user_id_for_limit)
+_today_usage = 0 if _premium_for_limit else get_today_usage_count(_user_id_for_limit)
+_limit_reached = (not _premium_for_limit) and _today_usage >= FREE_DAILY_LIMIT
+
+if not _premium_for_limit:
+    st.caption(
+        f"🔢 Free plan: {max(0, FREE_DAILY_LIMIT - _today_usage)} of {FREE_DAILY_LIMIT} "
+        "chart generations left today. Premium accounts are unlimited."
+    )
+
 # Keep last-cast form in session_state so the chart persists across reruns
-if "form" not in st.session_state or cast:
+_want_new_chart = "form" not in st.session_state or cast
+if _want_new_chart and _limit_reached and "form" in st.session_state:
+    st.warning(
+        f"⭐ You've used all {FREE_DAILY_LIMIT} free chart generations for today. "
+        "Upgrade to Premium below for unlimited charts, or come back tomorrow. "
+        "Showing your last-cast chart below."
+    )
+elif _want_new_chart:
     st.session_state["form"] = {
         "name": name, "dob": dob, "tob": tob, "city": city,
     }
@@ -2687,6 +2218,8 @@ if "form" not in st.session_state or cast:
             st.session_state["user"]["id"], name, dob.isoformat(), tob.isoformat(),
             city[0], city[1], city[2], city[3], city[4],
         )
+    if not _premium_for_limit:
+        increment_usage(_user_id_for_limit)
 form = st.session_state["form"]
 
 # ---- Compute birth chart + live transit ----------------------------------
@@ -2737,10 +2270,12 @@ with c1:
     dv_birth = make_varga_bodies(core_birth_bodies, diamond_varga)
     dv_transit = make_varga_bodies(core_transit_bodies, diamond_varga)
     dv_asc = next(b for b in dv_birth if b["key"] == "As")
-    svg_diamond = build_svg_chart(dv_birth, dv_transit, dv_asc["sign"])
+    svg_diamond = build_svg_chart(dv_birth, dv_transit, dv_asc["sign"], show_nakshatra=_premium_for_limit)
     st.components.v1.html(
         f'<div style="display:flex;justify-content:center;">{svg_diamond}</div>', height=760
     )
+    if not _premium_for_limit:
+        st.caption("⭐ Upgrade to Premium to see each graha's Nakṣatra directly on the chart.")
     st.markdown("</div>", unsafe_allow_html=True)
 
 with c2:
@@ -2780,7 +2315,7 @@ if is_premium(user_id):
         unsafe_allow_html=True,
     )
     if HAS_FPDF:
-        pdf_bytes = generate_kundali_pdf_bytes(birth_chart, transit_chart, form)
+        pdf_bytes = generate_kundali_pdf_bytes(birth_chart, form)
         st.download_button(
             "📄 Download Kundali PDF", data=pdf_bytes,
             file_name=f"kundali_{form['city'][0]}_{form['dob'].isoformat()}.pdf",
@@ -2802,6 +2337,16 @@ else:
         'and Viṁśottarī daśā timeline) for a one-time payment.</p>',
         unsafe_allow_html=True,
     )
+    if not PAYMENT_TEST_MODE and RAZORPAY_TEST_KEY:
+        st.info(
+            "🧪 Razorpay **Test Mode** keys are active — the real Razorpay checkout will open, "
+            "but it wants Razorpay's own dummy test credentials, not a real card:\n\n"
+            "- **Card:** `4111 1111 1111 1111` · any future expiry date · any CVV · "
+            "then enter any 4-10 digit OTP to succeed (fewer than 4 digits simulates a decline)\n"
+            "- **UPI:** enter `success@razorpay` to simulate success, or `failure@razorpay` "
+            "to simulate a decline\n\n"
+            "No real money moves with these — they only work because the key starts with `rzp_test_`."
+        )
     pcol1, pcol2 = st.columns([1, 1])
     with pcol1:
         st.markdown(
@@ -2811,94 +2356,64 @@ else:
         )
     with pcol2:
         st.markdown("<br>", unsafe_allow_html=True)
-        if not RAZORPAY_CONFIGURED:
-            st.button("Upgrade to Premium", use_container_width=True, key="start_checkout", disabled=True)
-            st.caption("Checkout is disabled until Razorpay is configured on this deployment.")
-        elif "premium_link_url" not in st.session_state:
+        if PAYMENT_TEST_MODE:
+            # ---- Test-mode path: no Razorpay call, no checkout modal, no real
+            # money. Same downstream effect (premium unlocked) so you can test
+            # the entire report-download flow right now.
+            if st.button("🧪 Simulate Payment (Test Mode)", use_container_width=True, key="simulate_payment"):
+                ok = simulate_test_payment(user_id, PREMIUM_PRICE_PAISE)
+                if ok:
+                    st.session_state["just_upgraded"] = True
+                    st.rerun()
+                else:
+                    st.error("Simulated payment could not be recorded — please try again.")
+        else:
             if st.button("Upgrade to Premium", use_container_width=True, key="start_checkout"):
                 try:
-                    reference_id = f"user{user_id}-{secrets.token_hex(8)}"
-                    link = razorpay_create_payment_link(
-                        PREMIUM_PRICE_PAISE, reference_id, f"{APP_BASE_URL}/",
-                        customer_name=form.get("name", ""),
+                    order = razorpay_create_order(
+                        PREMIUM_PRICE_PAISE, receipt=f"user{user_id}-{int(time.time())}"
                     )
-                    record_payment_link(user_id, link["id"], reference_id, PREMIUM_PRICE_PAISE)
-                    st.session_state["premium_link_url"] = link["short_url"]
-                    st.session_state["premium_link_reference_id"] = reference_id
-                    st.rerun()
+                    record_order(user_id, order["id"], PREMIUM_PRICE_PAISE)
+                    st.session_state["checkout_order_id"] = order["id"]
+                    st.session_state.pop("checkout_rendered_for", None)
                 except requests.HTTPError as e:
-                    st.error(f"Couldn't create payment link — Razorpay rejected the request: {e}")
+                    st.error(f"Couldn't start checkout — Razorpay rejected the request: {e}")
                 except requests.RequestException as e:
                     st.error(f"Couldn't reach Razorpay — check your connection and try again. ({e})")
 
-    # A Payment Link is a real, plain URL hosted by Razorpay — not embedded in
-    # any iframe on our side — so a normal link/button click opens it exactly
-    # like clicking any other link, with none of the sandbox restrictions that
-    # blocked the old embedded Checkout.js modal from ever navigating or
-    # opening a new tab.
-    if RAZORPAY_CONFIGURED and "premium_link_url" in st.session_state:
-        link_url = st.session_state["premium_link_url"]
-        st.markdown(
-            '<p class="kmuted" style="margin-top:10px;">Your payment link is ready — it opens in a new tab. '
-            "After paying, come back to this tab; it will refresh automatically once verified.</p>",
-            unsafe_allow_html=True,
-        )
-        if hasattr(st, "link_button"):
-            st.link_button("💳 Pay ₹" + str(PREMIUM_PRICE_INR) + " with Razorpay →", link_url, use_container_width=True)
-        else:
-            st.markdown(
-                f'<a href="{link_url}" target="_blank" rel="noopener" style="display:block; text-align:center; '
-                f'background:{C["gold"]}; color:#fff; border-radius:6px; padding:10px 20px; font-size:15px; '
-                f'font-family:Georgia, serif; text-decoration:none; font-weight:600;">'
-                f'💳 Pay ₹{PREMIUM_PRICE_INR} with Razorpay →</a>',
-                unsafe_allow_html=True,
-            )
-        rcol1, rcol2 = st.columns([1, 1])
-        with rcol1:
-            if st.button("I've paid — refresh", use_container_width=True, key="refresh_after_pay"):
-                st.rerun()
-        with rcol2:
-            if st.button("Cancel / get a new link", use_container_width=True, key="cancel_checkout"):
-                st.session_state.pop("premium_link_url", None)
-                st.session_state.pop("premium_link_reference_id", None)
-                st.rerun()
-
-    st.caption("Secured by Razorpay · UPI, cards, netbanking, and wallets accepted.")
-
-    # ---- Standard Checkout (embedded modal) — secondary/experimental option.
-    # Payment Links above is the reliable path; this satisfies Razorpay's
-    # generic "Standard Web Checkout" integration prompt for accounts where
-    # that matters, but it lives inside a sandboxed component iframe that
-    # testing showed can't reliably complete its post-payment redirect.
-    if RAZORPAY_CONFIGURED:
-        with st.expander("⚡ Standard Checkout (experimental — use Payment Link above if this doesn't work)"):
-            st.caption(
-                "This is Razorpay's embedded checkout modal. It may not complete the redirect back "
-                "to this app in every browser — if payment succeeds but nothing happens afterward, "
-                "use the Payment Link option above instead; it's the reliable path."
-            )
-            pending_order_id = st.session_state.get("standard_checkout_order_id")
-            if pending_order_id is None:
-                if st.button("Start Standard Checkout", use_container_width=True, key="start_standard_checkout"):
-                    try:
-                        order = razorpay_create_order_sdk(
-                            PREMIUM_PRICE_PAISE, receipt=f"user{user_id}-{secrets.token_hex(8)}"
-                        )
-                        record_order(user_id, order["id"], PREMIUM_PRICE_PAISE)
-                        st.session_state["standard_checkout_order_id"] = order["id"]
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Couldn't create order — Razorpay rejected the request: {e}")
-            else:
-                render_standard_checkout(
+    # If we have a live order in flight, open the actual Razorpay Checkout modal —
+    # but only render/open it ONCE per order. Without this guard, any unrelated
+    # widget interaction elsewhere on the page (which triggers a Streamlit rerun)
+    # would re-render this component and pop the checkout modal open again, which
+    # is exactly what produced the "giant blank area, charts pushed out of view"
+    # symptom: a tall (700px) iframe kept re-appearing on every rerun.
+    if not PAYMENT_TEST_MODE:
+        pending_order_id = st.session_state.get("checkout_order_id")
+        if pending_order_id:
+            if st.session_state.get("checkout_rendered_for") != pending_order_id:
+                render_razorpay_checkout(
                     pending_order_id, PREMIUM_PRICE_PAISE,
                     form.get("name", ""), st.session_state["user"]["username"],
                 )
-                if st.button("Cancel", use_container_width=True, key="cancel_standard_checkout"):
-                    st.session_state.pop("standard_checkout_order_id", None)
-                    st.rerun()
-st.markdown("</div>", unsafe_allow_html=True)
+                st.session_state["checkout_rendered_for"] = pending_order_id
+            else:
+                rcol1, rcol2 = st.columns([1, 1])
+                with rcol1:
+                    if st.button("Reopen payment window", use_container_width=True, key="reopen_checkout"):
+                        st.session_state["checkout_rendered_for"] = None
+                        st.rerun()
+                with rcol2:
+                    if st.button("Cancel", use_container_width=True, key="cancel_checkout"):
+                        st.session_state.pop("checkout_order_id", None)
+                        st.session_state.pop("checkout_rendered_for", None)
+                        st.rerun()
 
+    if PAYMENT_TEST_MODE:
+        st.caption("🧪 Test mode active — clicking the button above instantly unlocks premium. "
+                   "No Razorpay, no card, no charge.")
+    else:
+        st.caption("Secured by Razorpay · UPI, cards, netbanking, and wallets accepted.")
+st.markdown("</div>", unsafe_allow_html=True)
 
 # ---- Row 2: Nakṣatra table + Vimśottarī Mahādaśā + Pañcāṅga -------------
 c4, c5, c6 = st.columns([1, 1, 0.8])
