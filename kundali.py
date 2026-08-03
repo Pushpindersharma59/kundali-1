@@ -2203,12 +2203,19 @@ if not _premium_for_limit:
 
 # Keep last-cast form in session_state so the chart persists across reruns
 _want_new_chart = "form" not in st.session_state or cast
-if _want_new_chart and _limit_reached and "form" in st.session_state:
+if _want_new_chart and _limit_reached:
     st.warning(
         f"⭐ You've used all {FREE_DAILY_LIMIT} free chart generations for today. "
-        "Upgrade to Premium below for unlimited charts, or come back tomorrow. "
-        "Showing your last-cast chart below."
+        "Upgrade to Premium below for unlimited charts, or come back tomorrow."
     )
+    if "form" not in st.session_state:
+        # Fresh browser session (new tab/refresh) with the limit already used up —
+        # there's nothing cached to fall back to, so still populate the current
+        # widget values so something renders, but WITHOUT counting it as a new
+        # generation (no increment_usage call here, unlike the branch below).
+        st.session_state["form"] = {
+            "name": name, "dob": dob, "tob": tob, "city": city,
+        }
 elif _want_new_chart:
     st.session_state["form"] = {
         "name": name, "dob": dob, "tob": tob, "city": city,
@@ -2252,6 +2259,10 @@ core_transit_bodies = [b for b in transit_chart["bodies"] if b["key"] in CORE_KE
 # ---- Row 1: Diamond chart + Circular chart, each with its own D1..D60 selector ----
 c1, c2 = st.columns([1, 1])
 
+# Divisional (varga) charts beyond D1 are a premium feature — free accounts
+# only get the plain Rāśi chart (D1) in both the diamond and wheel views.
+_varga_choices_for_limit = VARGA_OPTIONS if _premium_for_limit else ["D1"]
+
 with c1:
     st.markdown(
         '<div class="kcard"><h4 style="display:flex;justify-content:space-between;'
@@ -2260,7 +2271,7 @@ with c1:
         unsafe_allow_html=True,
     )
     diamond_varga = st.selectbox(
-        "Chart", VARGA_OPTIONS, index=0, key="diamond_varga_select", label_visibility="collapsed"
+        "Chart", _varga_choices_for_limit, index=0, key="diamond_varga_select", label_visibility="collapsed"
     )
     st.markdown(
         f'<p class="kmuted" style="font-size:12px;margin:2px 0 10px 0;'
@@ -2275,7 +2286,10 @@ with c1:
         f'<div style="display:flex;justify-content:center;">{svg_diamond}</div>', height=760
     )
     if not _premium_for_limit:
-        st.caption("⭐ Upgrade to Premium to see each graha's Nakṣatra directly on the chart.")
+        st.caption(
+            "⭐ Upgrade to Premium to see each graha's Nakṣatra, and to unlock "
+            "divisional charts (D2–D60)."
+        )
     st.markdown("</div>", unsafe_allow_html=True)
 
 with c2:
@@ -2286,7 +2300,7 @@ with c2:
         unsafe_allow_html=True,
     )
     circular_varga = st.selectbox(
-        "Chart", VARGA_OPTIONS, index=0, key="circular_varga_select", label_visibility="collapsed"
+        "Chart", _varga_choices_for_limit, index=0, key="circular_varga_select", label_visibility="collapsed"
     )
     st.markdown(
         f'<p class="kmuted" style="font-size:12px;margin:2px 0 10px 0;'
@@ -2302,7 +2316,10 @@ with c2:
     st.components.v1.html(
         f'<div style="display:flex;justify-content:center;">{svg_circular}</div>', height=760
     )
+    if not _premium_for_limit:
+        st.caption("⭐ Upgrade to Premium to unlock divisional charts (D2–D60) on the wheel too.")
     st.markdown("</div>", unsafe_allow_html=True)
+
 
 # ---- Premium: paid Kundali report (PDF, with HTML fallback) ---------------
 user_id = st.session_state["user"]["id"]
