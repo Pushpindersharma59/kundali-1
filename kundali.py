@@ -1314,6 +1314,23 @@ def seed_demo_account():
 
 seed_demo_account()
 
+# ---- Ready-made premium account, for your own testing ----------------------
+# Logs straight in with premium already unlocked — no payment flow needed to
+# see the Nakṣatra-on-chart, divisional charts (D2–D60), or PDF/HTML report.
+PREMIUM_DEMO_USERNAME = "premium_demo"
+PREMIUM_DEMO_PASSWORD = "Demo@12345"
+
+
+def seed_premium_demo_account():
+    if not username_taken(PREMIUM_DEMO_USERNAME):
+        create_user(PREMIUM_DEMO_USERNAME, PREMIUM_DEMO_PASSWORD)
+    demo_user, _ = authenticate(PREMIUM_DEMO_USERNAME, PREMIUM_DEMO_PASSWORD)
+    if demo_user and not is_premium(demo_user["id"]):
+        set_premium(demo_user["id"], True)
+
+
+seed_premium_demo_account()
+
 
 def render_auth_screen():
     """Full-page login / signup flow. Returns nothing — sets
@@ -1859,86 +1876,40 @@ PAYMENT_TEST_MODE = (
 )
 
 
-def razorpay_create_order(amount_paise: int, receipt: str) -> dict:
-    """Creates a Razorpay Order server-side (using the secret key, never exposed to
-    the browser). Raises requests.HTTPError on failure."""
+def razorpay_create_payment_link(amount_paise: int, user_id: int, description: str, user_name: str = "") -> dict:
+    """Creates a Razorpay Payment Link — a real, hosted Razorpay page with its own
+    URL. The customer is sent there with a normal link (new tab), completes
+    payment on Razorpay's own domain, and Razorpay redirects them back to
+    callback_url when done. No iframe embedding anywhere in this flow, which
+    sidesteps the sizing/clipping problems that Checkout.js-in-an-iframe had."""
+    payload = {
+        "amount": amount_paise,
+        "currency": "INR",
+        "description": description,
+        "reference_id": f"user{user_id}-{int(time.time())}-{secrets.token_hex(3)}",
+        "callback_url": f"{APP_BASE_URL}/",
+        "callback_method": "get",
+    }
+    if user_name:
+        payload["customer"] = {"name": user_name}
     resp = requests.post(
-        "https://api.razorpay.com/v1/orders",
+        "https://api.razorpay.com/v1/payment_links",
         auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
-        json={
-            "amount": amount_paise,
-            "currency": "INR",
-            "receipt": receipt,
-            "payment_capture": 1,  # auto-capture on successful payment
-        },
+        json=payload,
         timeout=15,
     )
     resp.raise_for_status()
     return resp.json()
 
 
-def razorpay_verify_signature(order_id: str, payment_id: str, signature: str) -> bool:
-    """Standard Razorpay Checkout signature check: HMAC-SHA256 of
-    'order_id|payment_id' using the account's key secret. This is what proves
-    the success callback actually came from a completed Razorpay payment and
-    wasn't just typed into the URL bar."""
-    msg = f"{order_id}|{payment_id}".encode("utf-8")
+def razorpay_verify_payment_link_signature(plink_id: str, reference_id: str, status: str,
+                                            payment_id: str, signature: str) -> bool:
+    """Razorpay's documented Payment Link signature check: HMAC-SHA256 of
+    'payment_link_id|payment_link_reference_id|payment_link_status|razorpay_payment_id'
+    using the account's key secret."""
+    msg = f"{plink_id}|{reference_id}|{status}|{payment_id}".encode("utf-8")
     expected = hmac.new(RAZORPAY_KEY_SECRET.encode("utf-8"), msg, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
-
-
-def render_razorpay_checkout(order_id: str, amount_paise: int, user_name: str, username: str):
-    """Opens the Razorpay Checkout modal immediately and, on success, redirects the
-    top-level browser back to this app with the payment proof in the query string
-    so Streamlit can verify it server-side on the next run. Kept short (120px)
-    because the actual payment UI is Razorpay's own overlay/popup, not something
-    that needs a tall embedded frame — a tall frame here just leaves a big blank
-    gap on the page while checkout is idle or fails silently."""
-    success_url = f"{APP_BASE_URL}/?rzp_order_id={order_id}"
-    st.components.v1.html(
-        f"""
-        <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-        <div id="rzp-status" style="font-family:Georgia, serif; color:#7A6F5C; padding:10px 0; font-size:14px;">
-            Opening secure Razorpay checkout…
-        </div>
-        <script>
-        try {{
-            var options = {{
-                "key": "{RAZORPAY_KEY_ID}",
-                "amount": "{amount_paise}",
-                "currency": "INR",
-                "name": "Kuṇḍalī",
-                "description": "Premium Kundali report",
-                "order_id": "{order_id}",
-                "prefill": {{ "name": "{user_name or username}" }},
-                "theme": {{ "color": "#B8842E" }},
-                "handler": function (response) {{
-                    var url = "{success_url}"
-                        + "&rzp_payment_id=" + encodeURIComponent(response.razorpay_payment_id)
-                        + "&rzp_signature=" + encodeURIComponent(response.razorpay_signature);
-                    window.top.location.href = url;
-                }},
-                "modal": {{
-                    "ondismiss": function () {{
-                        document.getElementById("rzp-status").innerText =
-                            "Checkout closed — click 'Reopen payment window' below to retry.";
-                    }}
-                }}
-            }};
-            var rzp = new Razorpay(options);
-            rzp.on('payment.failed', function (response) {{
-                document.getElementById("rzp-status").innerText =
-                    "Payment failed: " + response.error.description;
-            }});
-            rzp.open();
-        }} catch (e) {{
-            document.getElementById("rzp-status").innerText =
-                "Couldn't open Razorpay checkout: " + e.message;
-        }}
-        </script>
-        """,
-        height=120,
-    )
 
 
 def simulate_test_payment(user_id: int, amount_paise: int) -> bool:
@@ -1962,32 +1933,38 @@ def handle_razorpay_return():
     does NOT depend on st.session_state['user'] being present — a full-page
     redirect back from Razorpay can land in a fresh browser session, so the
     account to credit comes from the payments ledger (order_owner), not from
-    whoever happens to be logged in on this particular run."""
+    whoever happens to be logged in on this particular run. Reads Razorpay's own
+    query-param names, since Payment Links append these automatically on redirect."""
     params = st.query_params
-    order_id = params.get("rzp_order_id")
-    payment_id = params.get("rzp_payment_id")
-    signature = params.get("rzp_signature")
-    if not (order_id and payment_id and signature):
+    plink_id = params.get("razorpay_payment_link_id")
+    reference_id = params.get("razorpay_payment_link_reference_id", "")
+    status = params.get("razorpay_payment_link_status")
+    payment_id = params.get("razorpay_payment_id")
+    signature = params.get("razorpay_signature")
+    if not (plink_id and payment_id and signature and status):
         return
     if payment_already_verified(payment_id):
         st.query_params.clear()
         return
-    if not razorpay_verify_signature(order_id, payment_id, signature):
+    if not razorpay_verify_payment_link_signature(plink_id, reference_id, status, payment_id, signature):
         st.query_params.clear()
         st.error("Payment verification failed — signature mismatch. If you were charged, "
                   "contact support with your payment ID: " + payment_id)
         return
-    owner = order_owner(order_id)
+    if status != "paid":
+        st.query_params.clear()
+        return
+    owner = order_owner(plink_id)
     if owner is None:
         st.query_params.clear()
         st.error("Payment verified but no matching order was found. Contact support with "
                   "payment ID: " + payment_id)
         return
-    if mark_order_paid(order_id, payment_id):
+    if mark_order_paid(plink_id, payment_id):
         set_premium(owner["user_id"], True)
         st.query_params.clear()
-        st.session_state.pop("checkout_order_id", None)
-        st.session_state.pop("checkout_rendered_for", None)
+        st.session_state.pop("premium_link_url", None)
+        st.session_state.pop("premium_link_id", None)
         st.session_state["just_upgraded"] = True
         st.rerun()
     else:
@@ -2384,46 +2361,39 @@ else:
                     st.rerun()
                 else:
                     st.error("Simulated payment could not be recorded — please try again.")
-        else:
-            if st.button("Upgrade to Premium", use_container_width=True, key="start_checkout"):
+        elif not st.session_state.get("premium_link_url"):
+            if st.button("Get payment link", use_container_width=True, key="start_checkout"):
                 try:
-                    order = razorpay_create_order(
-                        PREMIUM_PRICE_PAISE, receipt=f"user{user_id}-{int(time.time())}"
+                    link = razorpay_create_payment_link(
+                        PREMIUM_PRICE_PAISE, user_id, "Premium Kundali report",
+                        user_name=form.get("name", ""),
                     )
-                    record_order(user_id, order["id"], PREMIUM_PRICE_PAISE)
-                    st.session_state["checkout_order_id"] = order["id"]
-                    st.session_state.pop("checkout_rendered_for", None)
+                    record_order(user_id, link["id"], PREMIUM_PRICE_PAISE)
+                    st.session_state["premium_link_url"] = link["short_url"]
+                    st.session_state["premium_link_id"] = link["id"]
+                    st.rerun()
                 except requests.HTTPError as e:
-                    st.error(f"Couldn't start checkout — Razorpay rejected the request: {e}")
+                    st.error(f"Couldn't create a payment link — Razorpay rejected the request: {e}")
                 except requests.RequestException as e:
                     st.error(f"Couldn't reach Razorpay — check your connection and try again. ({e})")
 
-    # If we have a live order in flight, open the actual Razorpay Checkout modal —
-    # but only render/open it ONCE per order. Without this guard, any unrelated
-    # widget interaction elsewhere on the page (which triggers a Streamlit rerun)
-    # would re-render this component and pop the checkout modal open again, which
-    # is exactly what produced the "giant blank area, charts pushed out of view"
-    # symptom: a tall (700px) iframe kept re-appearing on every rerun.
-    if not PAYMENT_TEST_MODE:
-        pending_order_id = st.session_state.get("checkout_order_id")
-        if pending_order_id:
-            if st.session_state.get("checkout_rendered_for") != pending_order_id:
-                render_razorpay_checkout(
-                    pending_order_id, PREMIUM_PRICE_PAISE,
-                    form.get("name", ""), st.session_state["user"]["username"],
-                )
-                st.session_state["checkout_rendered_for"] = pending_order_id
-            else:
-                rcol1, rcol2 = st.columns([1, 1])
-                with rcol1:
-                    if st.button("Reopen payment window", use_container_width=True, key="reopen_checkout"):
-                        st.session_state["checkout_rendered_for"] = None
-                        st.rerun()
-                with rcol2:
-                    if st.button("Cancel", use_container_width=True, key="cancel_checkout"):
-                        st.session_state.pop("checkout_order_id", None)
-                        st.session_state.pop("checkout_rendered_for", None)
-                        st.rerun()
+    # A real Razorpay-hosted page — opens in a new tab via a plain link, no
+    # iframe embedding at all. This is what replaced the old Checkout.js-in-an-
+    # iframe approach, which kept clipping/rendering broken inside a small frame.
+    if not PAYMENT_TEST_MODE and st.session_state.get("premium_link_url"):
+        lcol1, lcol2 = st.columns([1, 1])
+        with lcol1:
+            st.link_button(
+                "💳 Pay ₹299 with Razorpay", st.session_state["premium_link_url"],
+                use_container_width=True,
+            )
+        with lcol2:
+            if st.button("Cancel / start over", use_container_width=True, key="cancel_checkout"):
+                st.session_state.pop("premium_link_url", None)
+                st.session_state.pop("premium_link_id", None)
+                st.rerun()
+        st.caption("Opens Razorpay's secure payment page in a new tab. Complete payment there, "
+                   "then come back to this tab — you'll be upgraded automatically within a few seconds.")
 
     if PAYMENT_TEST_MODE:
         st.caption("🧪 Test mode active — clicking the button above instantly unlocks premium. "
