@@ -2010,8 +2010,8 @@ st.markdown(
        main hamburger menu, "Deploy" button, footer, and the
        "Hosted with Streamlit" badge in the bottom-right corner. */
     #MainMenu {{ visibility: hidden; }}
-    header[data-testid="stHeader"] {{ visibility: hidden; height: 0; }}
-    footer {{ visibility: hidden; height: 0; }}
+    header[data-testid="stHeader"] {{ display: none; }}
+    footer {{ display: none; }}
     .stAppDeployButton {{ display: none; }}
     div[data-testid="stStatusWidget"] {{ visibility: hidden; }}
     a[href*="streamlit.io"] {{ display: none !important; }}
