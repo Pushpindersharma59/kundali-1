@@ -1445,6 +1445,115 @@ BODY_FULLNAME_ASCII = {
     "\u015aL": "Sri Lagna", "PP": "Pranapada Lagna", "ViL": "Vighatika Lagna",
 }
 
+# ---- Nakshatra ruling deity & symbol (classical, index-matched to NAKSHATRAS) ----
+NAKSHATRA_DEITY_ASCII = [
+    "Ashwini Kumaras", "Yama", "Agni", "Brahma", "Soma (Moon)", "Rudra", "Aditi",
+    "Brihaspati", "Nagas (serpents)", "Pitrs (ancestors)", "Bhaga", "Aryaman",
+    "Savitar", "Tvashtar (Vishwakarma)", "Vayu", "Indra-Agni", "Mitra", "Indra",
+    "Nirriti", "Apas (waters)", "Vishvadevas", "Vishnu", "Vasus (eight)", "Varuna",
+    "Aja Ekapada", "Ahir Budhnya", "Pushan",
+]
+NAKSHATRA_SYMBOL_ASCII = [
+    "Horse's head", "Yoni", "Razor / axe", "Chariot / cart", "Deer's head",
+    "Teardrop / gem", "Bow and quiver", "Cow's udder", "Coiled serpent",
+    "Royal throne", "Front legs of a bed", "Back legs of a bed", "Hand / fist",
+    "Bright jewel", "Young shoot / coral", "Triumphal archway", "Lotus",
+    "Circular amulet", "Bunch of roots", "Elephant tusk (front)",
+    "Elephant tusk (back)", "Ear / three footprints", "Drum", "Empty circle",
+    "Sword / front funeral cot", "Back of funeral cot", "Fish / drum",
+]
+
+# ---- Graha Maitri: classical Naisargika (natural, fixed) planetary friendship,
+# as given in Brihat Parashara Hora Shastra. Rahu/Ketu are shadow points and
+# aren't part of this classical five-fold-relationship scheme.
+GRAHA_MAITRI = {
+    "Su": {"friends": ["Mo", "Ma", "Jp"], "enemies": ["Ve", "Sa"], "neutral": ["Me"]},
+    "Mo": {"friends": ["Su", "Me"], "enemies": [], "neutral": ["Ma", "Jp", "Ve", "Sa"]},
+    "Ma": {"friends": ["Su", "Mo", "Jp"], "enemies": ["Me"], "neutral": ["Ve", "Sa"]},
+    "Me": {"friends": ["Su", "Ve"], "enemies": ["Mo"], "neutral": ["Ma", "Jp", "Sa"]},
+    "Jp": {"friends": ["Su", "Mo", "Ma"], "enemies": ["Me", "Ve"], "neutral": ["Sa"]},
+    "Ve": {"friends": ["Me", "Sa"], "enemies": ["Su", "Mo"], "neutral": ["Ma", "Jp"]},
+    "Sa": {"friends": ["Me", "Ve"], "enemies": ["Su", "Mo", "Ma"], "neutral": ["Jp"]},
+}
+
+# ---- House classification relative to the lagna (1-indexed house numbers) ----
+KENDRA_HOUSES = {1, 4, 7, 10}       # angular — strongest houses
+TRIKONA_HOUSES = {1, 5, 9}          # trine — most auspicious (Dharma trikona)
+UPACHAYA_HOUSES = {3, 6, 10, 11}    # growth houses — improve with time
+DUSTHANA_HOUSES = {6, 8, 12}        # difficult houses
+
+
+def _house_tags(house_num: int) -> list:
+    tags = []
+    if house_num in KENDRA_HOUSES:
+        tags.append("Kendra")
+    if house_num in TRIKONA_HOUSES:
+        tags.append("Trikona")
+    if house_num in UPACHAYA_HOUSES:
+        tags.append("Upachaya")
+    if house_num in DUSTHANA_HOUSES:
+        tags.append("Dusthana")
+    return tags
+
+
+# ---- Simple Muhurta helpers: sunrise/sunset -> Rahu Kalam, Yamaganda, Gulika
+# Kalam (inauspicious periods to avoid for new beginnings) and Abhijit Muhurta
+# (the auspicious window straddling local solar noon). These are the classical
+# day-length-divided-into-eighths / fifteenths rules used by most Panchang
+# tools — general daily guidance, not activity-specific electional astrology
+# (a proper muhurta for something like a wedding also weighs tithi, nakshatra,
+# lagna, and various doshas well beyond what's computed here).
+RAHU_KALAM_PART = [8, 2, 7, 5, 6, 4, 3]      # index 0=Sunday .. 6=Saturday
+YAMAGANDA_PART = [5, 4, 3, 2, 1, 7, 6]
+GULIKA_KALAM_PART = [7, 6, 5, 4, 3, 2, 1]
+
+
+def sun_times_utc_hours(y: int, mo: int, dd: int, lat: float, lon: float):
+    """Returns (sunrise, sunset, solar_noon) in UT decimal hours. Same low-precision
+    approach as sunrise_utc_hours (no equation-of-time correction)."""
+    jd_noon = julian_day(y, mo, dd, 12.0)
+    sun_trop = sun_longitude(jd_noon)
+    decl = declination(sun_trop, 0.0, jd_noon)
+    lat_r, decl_r = lat * D2R, decl * D2R
+    cosH = -math.tan(lat_r) * math.tan(decl_r)
+    cosH = max(-1.0, min(1.0, cosH))
+    H = math.acos(cosH) / D2R
+    solar_noon = 12.0 - lon / 15.0
+    return solar_noon - H / 15.0, solar_noon + H / 15.0, solar_noon
+
+
+def _fmt_hm(hours_float: float) -> str:
+    hours_float = hours_float % 24
+    h = int(hours_float)
+    m = int(round((hours_float - h) * 60))
+    if m == 60:
+        m = 0
+        h = (h + 1) % 24
+    return f"{h:02d}:{m:02d}"
+
+
+def compute_muhurta_windows(y: int, mo: int, dd: int, lat: float, lon: float, tz: float) -> dict:
+    sunrise_ut, sunset_ut, noon_ut = sun_times_utc_hours(y, mo, dd, lat, lon)
+    sunrise_local = sunrise_ut + tz
+    sunset_local = sunset_ut + tz
+    noon_local = noon_ut + tz
+    day_len = sunset_local - sunrise_local
+    weekday = date(y, mo, dd).isoweekday() % 7  # 0=Sunday .. 6=Saturday
+
+    def part_window(part_idx):
+        start = sunrise_local + (part_idx - 1) * day_len / 8
+        return start, start + day_len / 8
+
+    muhurta_len = day_len / 15
+    return {
+        "sunrise": sunrise_local,
+        "sunset": sunset_local,
+        "rahu_kalam": part_window(RAHU_KALAM_PART[weekday]),
+        "yamaganda": part_window(YAMAGANDA_PART[weekday]),
+        "gulika_kalam": part_window(GULIKA_KALAM_PART[weekday]),
+        "abhijit": (noon_local - muhurta_len / 2, noon_local + muhurta_len / 2),
+    }
+
 
 def _fmt_deg_ascii(x: float) -> str:
     """Same as fmt_deg but uses a plain apostrophe instead of the prime (′)
@@ -1699,6 +1808,71 @@ def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
         "0.1-0.5 degrees, mean node (Rahu/Ketu). Generated by the Kundali app - Lahiri "
         "ayanamsa. For high-stakes decisions, cross-check against a Swiss-Ephemeris-based tool.")
 
+    # ---------------- Page 5: Nakshatra Details, Graha Maitri, Houses, Muhurta ----------------
+    pdf.add_page()
+    banner("ASTROLOGICAL INSIGHTS", "Nakshatra Details, Graha Maitri, Houses & Muhurta")
+
+    section("Nakshatra Details (each graha's birth nakshatra)")
+    nak_detail_rows = []
+    for b in core_bodies:
+        idx = b["nakIdx"]
+        nak_detail_rows.append((
+            BODY_FULLNAME_ASCII.get(b["key"], b["key"]),
+            NAKSHATRAS_ASCII[idx],
+            NAKSHATRA_DEITY_ASCII[idx],
+            NAKSHATRA_SYMBOL_ASCII[idx],
+        ))
+    table(["Graha", "Nakshatra", "Deity", "Symbol"], nak_detail_rows, [34, 42, 46, 48], row_h=6.5)
+
+    section("Graha Maitri (Classical Planetary Friendship)")
+    maitri_rows = []
+    for k in ["Su", "Mo", "Ma", "Me", "Jp", "Ve", "Sa"]:
+        rel = GRAHA_MAITRI[k]
+        fmt_list = lambda ks: ", ".join(BODY_FULLNAME_ASCII.get(x, x).split(" ")[0] for x in ks) if ks else "-"
+        maitri_rows.append((
+            BODY_FULLNAME_ASCII[k], fmt_list(rel["friends"]), fmt_list(rel["neutral"]), fmt_list(rel["enemies"]),
+        ))
+    table(["Graha", "Friends", "Neutral", "Enemies"], maitri_rows, [36, 52, 52, 30], row_h=6.5)
+    pdf.set_font("Helvetica", "I", 7.5)
+    pdf.set_text_color(*MUTED)
+    pdf.multi_cell(0, 4,
+        "Naisargika (natural, fixed) friendship per Brihat Parashara Hora Shastra - not "
+        "adjusted for house placement in this chart (Tatkalika/compound friendship). "
+        "Rahu and Ketu are shadow points and fall outside this classical scheme.")
+
+    section("House Classification (relative to the Lagna)")
+    house_rows = []
+    for h in range(1, 13):
+        tags = _house_tags(h)
+        house_rows.append((str(h), SIGNS_ASCII[(b_asc["sign"] + h - 1) % 12], ", ".join(tags) if tags else "-"))
+    table(["House", "Sign", "Classification"], house_rows, [22, 60, 88], row_h=6)
+    pdf.set_font("Helvetica", "I", 7.5)
+    pdf.set_text_color(*MUTED)
+    pdf.multi_cell(0, 4,
+        "Kendra (1,4,7,10) = angular, strongest houses. Trikona (1,5,9) = trine, most "
+        "auspicious (Dharma). Upachaya (3,6,10,11) = grow stronger over time. "
+        "Dusthana (6,8,12) = difficult houses.")
+
+    section("Muhurta - Auspicious & Inauspicious Timings (birth date)")
+    lat_, lon_, tz_ = form["city"][2], form["city"][3], form["city"][4]
+    mw = compute_muhurta_windows(form["dob"].year, form["dob"].month, form["dob"].day, lat_, lon_, tz_)
+    muhurta_rows = [
+        ("Sunrise", _fmt_hm(mw["sunrise"]), "-"),
+        ("Sunset", _fmt_hm(mw["sunset"]), "-"),
+        ("Abhijit Muhurta", f'{_fmt_hm(mw["abhijit"][0])} - {_fmt_hm(mw["abhijit"][1])}', "Auspicious"),
+        ("Rahu Kalam", f'{_fmt_hm(mw["rahu_kalam"][0])} - {_fmt_hm(mw["rahu_kalam"][1])}', "Avoid"),
+        ("Yamaganda", f'{_fmt_hm(mw["yamaganda"][0])} - {_fmt_hm(mw["yamaganda"][1])}', "Avoid"),
+        ("Gulika Kalam", f'{_fmt_hm(mw["gulika_kalam"][0])} - {_fmt_hm(mw["gulika_kalam"][1])}', "Avoid"),
+    ]
+    table(["Period", "Window (local time)", "Guidance"], muhurta_rows, [50, 70, 50], row_h=7)
+    pdf.set_font("Helvetica", "I", 7.5)
+    pdf.set_text_color(*MUTED)
+    pdf.multi_cell(0, 4,
+        "General daily guidance only (day divided into 8/15 parts between sunrise and "
+        "sunset; no equation-of-time correction) - not a substitute for a full electional "
+        "(muhurta) analysis for a specific event, which also weighs tithi, nakshatra, "
+        "lagna, and relevant doshas.")
+
     out = pdf.output(dest="S")
     return out.encode("latin-1") if isinstance(out, str) else bytes(out)
 
@@ -1736,6 +1910,38 @@ def generate_kundali_html_report(birth_chart, form) -> str:
         f"<td>{b.get('karaka') or '—'}</td></tr>"
         for b in birth_chart["bodies"]
     )
+
+    nak_detail_rows = "".join(
+        f"<tr><td>{b['key']}</td><td>{NAKSHATRAS[b['nakIdx']]}</td>"
+        f"<td>{NAKSHATRA_DEITY_ASCII[b['nakIdx']]}</td><td>{NAKSHATRA_SYMBOL_ASCII[b['nakIdx']]}</td></tr>"
+        for b in core_bodies
+    )
+
+    def _maitri_list(ks):
+        return ", ".join(BODY_FULLNAME_ASCII.get(k, k) for k in ks) if ks else "—"
+
+    maitri_rows = "".join(
+        f"<tr><td>{BODY_FULLNAME_ASCII[k]}</td><td>{_maitri_list(v['friends'])}</td>"
+        f"<td>{_maitri_list(v['neutral'])}</td><td>{_maitri_list(v['enemies'])}</td></tr>"
+        for k, v in GRAHA_MAITRI.items()
+    )
+
+    house_rows = "".join(
+        f"<tr><td>{h}</td><td>{SIGNS[(b_asc['sign'] + h - 1) % 12]}</td>"
+        f"<td>{', '.join(_house_tags(h)) or '—'}</td></tr>"
+        for h in range(1, 13)
+    )
+
+    _lat, _lon, _tz = form["city"][2], form["city"][3], form["city"][4]
+    _mw = compute_muhurta_windows(form["dob"].year, form["dob"].month, form["dob"].day, _lat, _lon, _tz)
+    muhurta_rows = "".join([
+        f"<tr><td>Sunrise</td><td>{_fmt_hm(_mw['sunrise'])}</td><td>—</td></tr>",
+        f"<tr><td>Sunset</td><td>{_fmt_hm(_mw['sunset'])}</td><td>—</td></tr>",
+        f"<tr class='active'><td>Abhijit Muhūrta</td><td>{_fmt_hm(_mw['abhijit'][0])} – {_fmt_hm(_mw['abhijit'][1])}</td><td>Auspicious</td></tr>",
+        f"<tr><td>Rāhu Kālam</td><td>{_fmt_hm(_mw['rahu_kalam'][0])} – {_fmt_hm(_mw['rahu_kalam'][1])}</td><td>Avoid</td></tr>",
+        f"<tr><td>Yamaganda</td><td>{_fmt_hm(_mw['yamaganda'][0])} – {_fmt_hm(_mw['yamaganda'][1])}</td><td>Avoid</td></tr>",
+        f"<tr><td>Gulika Kālam</td><td>{_fmt_hm(_mw['gulika_kalam'][0])} – {_fmt_hm(_mw['gulika_kalam'][1])}</td><td>Avoid</td></tr>",
+    ])
 
     now_utc_ = datetime.utcnow()
     dasha_rows = "".join(
@@ -1798,6 +2004,37 @@ def generate_kundali_html_report(birth_chart, form) -> str:
     <tr><th>Lord</th><th>From</th><th>To</th><th>Duration</th></tr>
     {dasha_rows}
   </table>
+
+  <h2>Nakṣatra Details</h2>
+  <table>
+    <tr><th>Graha</th><th>Nakṣatra</th><th>Deity</th><th>Symbol</th></tr>
+    {nak_detail_rows}
+  </table>
+
+  <h2>Graha Maitri · Planetary Friendship</h2>
+  <table>
+    <tr><th>Graha</th><th>Friends</th><th>Neutral</th><th>Enemies</th></tr>
+    {maitri_rows}
+  </table>
+  <p class="footer" style="text-align:left;margin-top:10px;">Naisargika (natural, fixed) friendship per Bṛhat Parāśara
+  Horā Śāstra — not adjusted for house placement in this chart. Rāhu/Ketu fall outside this classical scheme.</p>
+
+  <h2>House Classification</h2>
+  <table>
+    <tr><th>House</th><th>Sign</th><th>Classification</th></tr>
+    {house_rows}
+  </table>
+  <p class="footer" style="text-align:left;margin-top:10px;">Kendra (1,4,7,10) = angular. Trikoṇa (1,5,9) = trine,
+  most auspicious. Upachaya (3,6,10,11) = grow stronger over time. Dusthāna (6,8,12) = difficult houses.</p>
+
+  <h2>Muhūrta · Timings on the Birth Date</h2>
+  <table>
+    <tr><th>Period</th><th>Window (local time)</th><th>Guidance</th></tr>
+    {muhurta_rows}
+  </table>
+  <p class="footer" style="text-align:left;margin-top:10px;">General daily guidance only (sunrise-to-sunset divided
+  into 8/15 parts, no equation-of-time correction) — not a substitute for a full electional analysis for a specific
+  event, which also weighs tithi, nakṣatra, lagna, and relevant doṣas.</p>
 
   <p class="footer">Generated by Kuṇḍalī · Lahiri ayanāṁśa engine · houses fixed to the birth lagna.<br>
   Engine accuracy: Sun/Moon within a few arc-minutes, other grahas ~0.1–0.5°, mean node.</p>
