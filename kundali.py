@@ -1476,6 +1476,101 @@ GRAHA_MAITRI = {
     "Sa": {"friends": ["Me", "Ve"], "enemies": ["Su", "Mo", "Ma"], "neutral": ["Jp"]},
 }
 
+# ---- Planetary dignity: exaltation / debilitation / own sign (classical, fixed).
+# Rahu/Ketu exaltation-debilitation varies by text; using the commonly cited
+# Parashari convention (Rahu: Taurus/Scorpio, Ketu: Scorpio/Taurus).
+EXALTATION_SIGN = {"Su": 0, "Mo": 1, "Ma": 9, "Me": 5, "Jp": 3, "Ve": 11, "Sa": 6, "Ra": 1, "Ke": 7}
+DEBILITATION_SIGN = {"Su": 6, "Mo": 7, "Ma": 3, "Me": 11, "Jp": 9, "Ve": 5, "Sa": 0, "Ra": 7, "Ke": 1}
+OWN_SIGNS = {"Su": {4}, "Mo": {3}, "Ma": {0, 7}, "Me": {2, 5}, "Jp": {8, 11}, "Ve": {1, 6}, "Sa": {9, 10}}
+
+
+def graha_dignity(key: str, sign: int) -> str:
+    if EXALTATION_SIGN.get(key) == sign:
+        return "Exalted"
+    if DEBILITATION_SIGN.get(key) == sign:
+        return "Debilitated"
+    if sign in OWN_SIGNS.get(key, set()):
+        return "Own Sign"
+    return "Neutral"
+
+
+# ---- Day-wise remedies: classical, general associations by weekday/ruling
+# planet. General traditional information, not a personalized prescription —
+# gemstones in particular should only be worn after a proper chart analysis,
+# since an unsuitable one can do more harm than good for some charts.
+DAY_REMEDIES = [
+    ("Sunday", "Su", "Ruby", "Red", "Offer water to the rising Sun; recite the Āditya Hṛdayam"),
+    ("Monday", "Mo", "Pearl", "White", "Offer milk to Śiva; chant the Candra mantra"),
+    ("Tuesday", "Ma", "Red Coral", "Red", "Recite the Hanumān Cālīsā; donate red lentils"),
+    ("Wednesday", "Me", "Emerald", "Green", "Feed green gram to birds or cows; chant Viṣṇu Sahasranāma"),
+    ("Thursday", "Jp", "Yellow Sapphire", "Yellow", "Worship Viṣṇu/Guru; donate turmeric or chana dal"),
+    ("Friday", "Ve", "Diamond / White Sapphire", "White", "Worship Goddess Lakṣmī; donate white items"),
+    ("Saturday", "Sa", "Blue Sapphire", "Black / Blue", "Recite the Śani mantra; donate mustard oil or black til"),
+]
+
+
+NAVAGRAHA_ORDER = ["Su", "Mo", "Ma", "Me", "Jp", "Ve", "Sa", "Ra", "Ke"]
+NAVAGRAHA_FULLNAME = {
+    "Su": "Sūrya", "Mo": "Candra", "Ma": "Maṅgala", "Me": "Budha", "Jp": "Guru",
+    "Ve": "Śukra", "Sa": "Śani", "Ra": "Rāhu", "Ke": "Ketu",
+}
+DIGNITY_COLOR_KEY = {"Exalted": "gold", "Debilitated": "muted", "Own Sign": "sindoor", "Neutral": "ivory"}
+
+
+def build_navagraha_wheel_svg(birth_bodies) -> str:
+    """A dedicated circular diagram of just the 9 grahas (fixed order, not tied
+    to zodiacal position), color-coded by classical dignity — exalted, own
+    sign, debilitated, or neutral — for an at-a-glance strength overview."""
+    cx, cy = 300, 300
+    R_outer, R_mid, R_inner = 280, 200, 60
+    n = len(NAVAGRAHA_ORDER)
+    seg = 360 / n
+    body_by_key = {b["key"]: b for b in birth_bodies}
+
+    parts = [
+        f'<svg viewBox="0 0 {2*cx} {2*cy}" width="600" height="600" '
+        'xmlns="http://www.w3.org/2000/svg" style="display:block;">',
+        '<defs><radialGradient id="navwheel" cx="50%" cy="50%" r="70%">'
+        '<stop offset="0%" stop-color="#FFFDE7" /><stop offset="100%" stop-color="#FFF3B0" />'
+        '</radialGradient></defs>',
+        f'<circle cx="{cx}" cy="{cy}" r="{R_outer}" fill="url(#navwheel)" stroke="{C["gold"]}" stroke-width="2"/>',
+        f'<circle cx="{cx}" cy="{cy}" r="{R_mid}" fill="none" stroke="{C["line"]}" stroke-width="1"/>',
+    ]
+
+    for i, key in enumerate(NAVAGRAHA_ORDER):
+        boundary = i * seg - seg / 2
+        x1, y1 = _wheel_point(cx, cy, R_inner, boundary)
+        x2, y2 = _wheel_point(cx, cy, R_outer, boundary)
+        parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+                      f'stroke="{C["line"]}" stroke-width="1"/>')
+
+        center_angle = i * seg
+        b = body_by_key.get(key)
+        if b is None:
+            continue
+        dignity = graha_dignity(key, b["sign"])
+        fill = C[DIGNITY_COLOR_KEY[dignity]]
+        retro = "℞" if (b["retro"] and key not in ("Ra", "Ke")) else ""
+
+        lx, ly = _wheel_point(cx, cy, (R_outer + R_mid) / 2, center_angle)
+        parts.append(f'<text x="{lx:.1f}" y="{ly-8:.1f}" text-anchor="middle" font-size="15" '
+                      f'font-weight="700" fill="{fill}" font-family="Georgia, serif">{NAVAGRAHA_FULLNAME[key]}</text>')
+        parts.append(f'<text x="{lx:.1f}" y="{ly+8:.1f}" text-anchor="middle" font-size="11" '
+                      f'fill="{C["muted"]}" font-family="monospace">{SIGN_ABBR[b["sign"]]} {math.floor(b["inSign"])}°{retro}</text>')
+        parts.append(f'<text x="{lx:.1f}" y="{ly+22:.1f}" text-anchor="middle" font-size="9" '
+                      f'fill="{fill}" font-family="Georgia, serif">{dignity}</text>')
+
+        mx, my = _wheel_point(cx, cy, (R_mid + R_inner) / 2, center_angle)
+        parts.append(f'<text x="{mx:.1f}" y="{my:.1f}" text-anchor="middle" dominant-baseline="middle" '
+                      f'font-size="9" fill="{C["muted"]}" font-family="monospace">{NAK_ABBR[b["nakIdx"]]}</text>')
+
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_inner}" fill="{C["panel"]}" stroke="{C["gold"]}" stroke-width="1.5"/>')
+    parts.append(f'<text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="middle" '
+                 f'font-size="16" font-weight="700" fill="{C["gold"]}" font-family="Georgia, serif">Navagraha</text>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 # ---- House classification relative to the lagna (1-indexed house numbers) ----
 KENDRA_HOUSES = {1, 4, 7, 10}       # angular — strongest houses
 TRIKONA_HOUSES = {1, 5, 9}          # trine — most auspicious (Dharma trikona)
@@ -2528,6 +2623,65 @@ if is_premium(user_id):
             "📄 Download Kundali Report (HTML)", data=html_report,
             file_name=f"kundali_{form['city'][0]}_{form['dob'].isoformat()}.html",
             mime="text/html", use_container_width=True,
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    tab_nav, tab_transit, tab_remedy = st.tabs(
+        ["🪐 Navagraha Wheel", "🔄 Current Transit", "📿 Day-wise Remedies"]
+    )
+
+    with tab_nav:
+        nav_svg = build_navagraha_wheel_svg(core_birth_bodies)
+        st.components.v1.html(
+            f'<div style="display:flex;justify-content:center;">{nav_svg}</div>', height=620
+        )
+        st.caption(
+            "The nine grahas at birth, color-coded by classical dignity — "
+            f"<span style='color:{C['gold']};font-weight:700;'>gold = exalted</span>, "
+            f"<span style='color:{C['sindoor']};font-weight:700;'>red = own sign</span>, "
+            f"<span style='color:{C['muted']};font-weight:700;'>grey = debilitated</span>, "
+            "ivory = neutral.", unsafe_allow_html=True,
+        )
+
+    with tab_transit:
+        st.markdown(f'<p class="kmuted" style="margin-bottom:10px;">As of {transit_label} '
+                     f'({form["city"][0]})</p>', unsafe_allow_html=True)
+        t_header = "<tr><th>Graha</th><th>Current Position</th><th>Transiting House</th><th>Nakṣatra</th></tr>"
+        t_rows = []
+        for b in core_transit_bodies:
+            if b["key"] == "As":
+                continue
+            house_num = ((b["sign"] - b_asc["sign"]) % 12) + 1
+            retro = " ℞" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
+            t_rows.append(
+                f'<tr><td class="body-key">{b["key"]}</td>'
+                f'<td>{SIGNS[b["sign"]]} {fmt_deg(b["inSign"])}{retro}</td>'
+                f'<td>House {house_num}</td>'
+                f'<td>{NAKSHATRAS[b["nakIdx"]]}</td></tr>'
+            )
+        st.markdown(
+            f'<table class="gtable">{t_header}{"".join(t_rows)}</table>'
+            f'<p class="kmuted" style="font-size:12px;margin-top:8px;">'
+            "House numbers are relative to your birth lagna. ℞ = retrograde.</p>",
+            unsafe_allow_html=True,
+        )
+
+    with tab_remedy:
+        today_idx = date.today().isoweekday() % 7  # 0=Sunday .. 6=Saturday
+        r_header = "<tr><th>Day</th><th>Graha</th><th>Gemstone</th><th>Colour</th><th>Suggested Practice</th></tr>"
+        r_rows = []
+        for i, (day_name, key, gem, colour, remedy) in enumerate(DAY_REMEDIES):
+            style = f' style="background:{C["panelSoft"]};font-weight:700;"' if i == today_idx else ""
+            r_rows.append(
+                f'<tr{style}><td>{day_name}{" (today)" if i == today_idx else ""}</td>'
+                f'<td>{BODY_FULLNAME_ASCII.get(key, key)}</td><td>{gem}</td><td>{colour}</td>'
+                f'<td>{remedy}</td></tr>'
+            )
+        st.markdown(f'<table class="gtable">{r_header}{"".join(r_rows)}</table>', unsafe_allow_html=True)
+        st.caption(
+            "⚠️ General traditional associations, not a personalised prescription — gemstones in "
+            "particular should only be worn after a proper chart analysis, since an unsuitable one "
+            "can do more harm than good for some charts."
         )
 else:
     st.markdown(
