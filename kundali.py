@@ -1846,6 +1846,15 @@ TRIKONA_HOUSES = {1, 5, 9}          # trine — most auspicious (Dharma trikona)
 UPACHAYA_HOUSES = {3, 6, 10, 11}    # growth houses — improve with time
 DUSTHANA_HOUSES = {6, 8, 12}        # difficult houses
 
+# ---- Puruṣārtha Trikoṇa: the four goals-of-life groupings, each a set of 3
+# houses spaced 4 apart, each classically tied to one element (tattva).
+HOUSE_TRIKONA_GROUP = {
+    1: "Dharma Trikona (Fire)", 5: "Dharma Trikona (Fire)", 9: "Dharma Trikona (Fire)",
+    2: "Artha Trikona (Earth)", 6: "Artha Trikona (Earth)", 10: "Artha Trikona (Earth)",
+    3: "Kama Trikona (Air)", 7: "Kama Trikona (Air)", 11: "Kama Trikona (Air)",
+    4: "Moksha Trikona (Water)", 8: "Moksha Trikona (Water)", 12: "Moksha Trikona (Water)",
+}
+
 
 def _house_tags(house_num: int) -> list:
     tags = []
@@ -2223,14 +2232,19 @@ def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
     house_rows = []
     for h in range(1, 13):
         tags = _house_tags(h)
-        house_rows.append((str(h), SIGNS_ASCII[(b_asc["sign"] + h - 1) % 12], ", ".join(tags) if tags else "-"))
-    table(["House", "Sign", "Classification"], house_rows, [22, 60, 88], row_h=6)
+        house_rows.append((
+            str(h), SIGNS_ASCII[(b_asc["sign"] + h - 1) % 12],
+            ", ".join(tags) if tags else "-", HOUSE_TRIKONA_GROUP[h],
+        ))
+    table(["House", "Sign", "Classification", "Trikona Group"], house_rows, [16, 44, 60, 60], row_h=6)
     pdf.set_font("Helvetica", "I", 7.5)
     pdf.set_text_color(*MUTED)
     pdf.multi_cell(0, 4,
         "Kendra (1,4,7,10) = angular, strongest houses. Trikona (1,5,9) = trine, most "
-        "auspicious (Dharma). Upachaya (3,6,10,11) = grow stronger over time. "
-        "Dusthana (6,8,12) = difficult houses.")
+        "auspicious. Upachaya (3,6,10,11) = grow stronger over time. Dusthana (6,8,12) = "
+        "difficult houses. Trikona Group = the four goals-of-life groupings (Dharma/Artha/"
+        "Kama/Moksha), each tied to one element: 1,5,9 = Fire; 2,6,10 = Earth; "
+        "3,7,11 = Air; 4,8,12 = Water.")
 
     section("Muhurta - Auspicious & Inauspicious Timings (birth date)")
     lat_, lon_, tz_ = form["city"][2], form["city"][3], form["city"][4]
@@ -2308,7 +2322,7 @@ def generate_kundali_html_report(birth_chart, form) -> str:
 
     house_rows = "".join(
         f"<tr><td>{h}</td><td>{SIGNS[(b_asc['sign'] + h - 1) % 12]}</td>"
-        f"<td>{', '.join(_house_tags(h)) or '—'}</td></tr>"
+        f"<td>{', '.join(_house_tags(h)) or '—'}</td><td>{HOUSE_TRIKONA_GROUP[h]}</td></tr>"
         for h in range(1, 13)
     )
 
@@ -2401,11 +2415,13 @@ def generate_kundali_html_report(birth_chart, form) -> str:
 
   <h2>House Classification</h2>
   <table>
-    <tr><th>House</th><th>Sign</th><th>Classification</th></tr>
+    <tr><th>House</th><th>Sign</th><th>Classification</th><th>Trikoṇa Group</th></tr>
     {house_rows}
   </table>
   <p class="footer" style="text-align:left;margin-top:10px;">Kendra (1,4,7,10) = angular. Trikoṇa (1,5,9) = trine,
-  most auspicious. Upachaya (3,6,10,11) = grow stronger over time. Dusthāna (6,8,12) = difficult houses.</p>
+  most auspicious. Upachaya (3,6,10,11) = grow stronger over time. Dusthāna (6,8,12) = difficult houses.
+  Trikoṇa Group = the four goals-of-life groupings (Dharma/Artha/Kāma/Mokṣa), each tied to one element:
+  1,5,9 = Fire; 2,6,10 = Earth; 3,7,11 = Air; 4,8,12 = Water.</p>
 
   <h2>Muhūrta · Timings on the Birth Date</h2>
   <table>
