@@ -1571,6 +1571,250 @@ def build_navagraha_wheel_svg(birth_bodies) -> str:
     return "".join(parts)
 
 
+# ============================================================
+# NAVTARA CHAKRA — nine-tara auspiciousness calendar
+# ============================================================
+# Ported from a standalone Flask tool. That version used average lunar
+# periods anchored to a single reference date to project nakshatra/tithi
+# for any day — a reasonable approximation, but one that drifts and needs
+# re-anchoring occasionally. This app already has a real ephemeris (the
+# same Sun/Moon longitude + ayanamsa math used everywhere else here), so
+# every date below is computed directly instead of projected — the
+# curated tara descriptions (meaning/significance/dos/avoids/tip) are
+# unchanged from the original.
+
+NAVTARA_INFO = [
+    dict(name="Janma", good=False, bg="#F7C1C1", fg="#501313",
+         meaning="Your own nakshatra recurring every 27 days. Considered the mildest "
+                 "of the four difficult taras, since it simply marks the day the moon "
+                 "returns to your birth star.",
+         significance="Rules the physical body and general life current. Not deeply "
+                       "harmful, but not a day to push your luck either.",
+         dos=["Routine chores and errands", "Self-care, rest", "Continuing existing work",
+              "Worship or prayer tied to your own nakshatra"],
+         avoids=["Launching new ventures", "Big financial commitments", "Important travel"],
+         tip="If something is unavoidable today, check the hourly choghadiya for a "
+             "favorable window rather than skipping the day entirely."),
+    dict(name="Sampat", good=True, bg="#97C459", fg="#173404",
+         meaning="Counted 2nd from janma. Governs gain, prosperity, and the "
+                 "accumulation of resources.",
+         significance="One of the four classically auspicious taras. Energy tends to "
+                       "flow toward growth and accumulation.",
+         dos=["Buying property or gold", "Starting a business", "Signing financial deals",
+              "Investments", "Opening accounts"],
+         avoids=["Nothing specific, but avoid pure speculation"],
+         tip="Favored for anything where you want the outcome to multiply or compound "
+             "over time."),
+    dict(name="Vipat", good=False, bg="#E24B4A", fg="#ffffff",
+         meaning="Counted 3rd from janma. Associated with risk, accidents, and "
+                 "reversals of fortune.",
+         significance="One of the four difficult taras and considered strongly "
+                       "unfavorable, second only to Vadha in severity.",
+         dos=["Cautious, low-stakes tasks", "Reviewing plans", "Indoor, low-risk work"],
+         avoids=["Travel", "Medical procedures", "Signing contracts", "New beginnings",
+                 "Adventurous activity"],
+         tip="Best treated as a day to consolidate and double check, not to move forward."),
+    dict(name="Kshema", good=True, bg="#C0DD97", fg="#173404",
+         meaning="Counted 4th from janma. Governs safety, comfort, and steady wellbeing.",
+         significance="A gentle, stabilizing auspicious tara, milder than Sampat or "
+                       "Sadhaka but still favorable.",
+         dos=["Health checkups or treatment", "Family functions", "Safe travel",
+              "Moving house", "Routine wellbeing rituals"],
+         avoids=["No major restriction"],
+         tip="Good default choice when you just need a safe, uneventful day for "
+             "something important."),
+    dict(name="Pratyari", good=False, bg="#F09595", fg="#501313",
+         meaning="Counted 5th from janma, also called Pratyak. Creates friction, "
+                 "delay, and opposition from others.",
+         significance="A moderately difficult tara: not as severe as Vipat or Vadha, "
+                       "but prone to plans stalling midway.",
+         dos=["Clearing pending, small tasks", "Patience-based work", "Internal planning"],
+         avoids=["Starting projects", "Negotiations", "Travel", "Disputes or confrontations"],
+         tip="If a meeting or negotiation is unavoidable, expect it to take longer "
+             "than planned."),
+    dict(name="Sadhaka", good=True, bg="#639922", fg="#ffffff",
+         meaning="Counted 6th from janma. Governs the successful completion of effort "
+                 "and intention.",
+         significance="A strong auspicious tara, especially favored for anything "
+                       "requiring focused effort toward a goal.",
+         dos=["Important meetings", "Exams, study", "Spiritual practice", "Negotiations",
+              "Skill-building"],
+         avoids=["No major restriction"],
+         tip="Considered one of the best days to start something that needs "
+             "sustained follow-through."),
+    dict(name="Vadha", good=False, bg="#A32D2D", fg="#ffffff",
+         meaning="Counted 7th from janma, also called Naidhana. The most severe of "
+                 "the nine taras.",
+         significance="Classically the tara to avoid most. Associated with loss, "
+                       "injury, or the collapse of plans.",
+         dos=["Rest and quiet activity only"],
+         avoids=["Marriage or ceremonies", "Surgery", "Signing contracts", "Travel",
+                 "Any new beginning"],
+         tip="Traditionally postponed rather than worked around. Wait for the next "
+             "favorable tara if at all possible."),
+    dict(name="Mitra", good=True, bg="#EAF3DE", fg="#27500A",
+         meaning="Counted 8th from janma. Governs cooperation, goodwill, and "
+                 "harmonious relationships.",
+         significance="A mild but reliable auspicious tara, well suited to anything "
+                       "involving other people.",
+         dos=["Meetings and partnerships", "Social events", "Friendly negotiations",
+              "Reconciliation"],
+         avoids=["No major restriction"],
+         tip="A good day to repair a relationship or start a collaboration."),
+    dict(name="Parama Mitra", good=True, bg="#3B6D11", fg="#ffffff",
+         meaning="Counted 9th from janma, the final tara in the cycle. Considered the "
+                 "single most auspicious of the nine.",
+         significance="Combines the strengths of all the favorable taras before it. "
+                       "Ideal for the most significant undertakings.",
+         dos=["Marriage and ceremonies", "Business launches", "Travel",
+              "Signing important deals", "Griha pravesh"],
+         avoids=["No major restriction"],
+         tip="When you have a choice of dates for something major, this is usually "
+             "the first tara to look for."),
+]
+
+
+def navtara_moon_info(y: int, mo: int, dd: int, hour_local: float, tz: float) -> dict:
+    """Real (not average-projected) nakshatra/pada/navamsa for a given local date,
+    evaluated at hour_local on that date."""
+    ut_hours = hour_local - tz
+    jd = julian_day(y, mo, dd, ut_hours)
+    ayan = ayanamsa(jd)
+    moon_sid = norm360(moon_longitude(jd) - ayan)
+    nak_span = 360 / 27
+    nak_idx = int(moon_sid // nak_span)
+    frac = (moon_sid % nak_span) / nak_span
+    pada = min(4, int(frac * 4) + 1)
+    sign_idx = int(moon_sid // 30)
+    return {
+        "nak_idx": nak_idx, "frac": frac, "pada": pada, "sign_idx": sign_idx,
+        "pada_sign_idx": navamsa_sign(moon_sid), "moon_sid": moon_sid,
+    }
+
+
+def navtara_tithi_info(y: int, mo: int, dd: int, hour_local: float, tz: float):
+    ut_hours = hour_local - tz
+    jd = julian_day(y, mo, dd, ut_hours)
+    elong = norm360(moon_longitude(jd) - sun_longitude(jd))
+    idx = int(elong // 12)
+    paksha = "Shukla" if idx < 15 else "Krishna"
+    local_idx = idx if idx < 15 else idx - 15
+    if local_idx == 14:
+        name = "Purnima" if paksha == "Shukla" else "Amavasya"
+    else:
+        name = TITHIS_ASCII[local_idx]
+    return paksha, name
+
+
+def navtara_tara_index(nak_idx: int, birth_nak_idx: int) -> int:
+    return ((nak_idx - birth_nak_idx) % 27) % 9
+
+
+def render_navtara_chakra_tab(default_birth_nak_idx: int, tz: float):
+    import calendar as _cal
+
+    col_a, col_b = st.columns([1, 1])
+    with col_a:
+        birth_label = st.selectbox(
+            "Janma Nakṣatra", NAKSHATRAS, index=default_birth_nak_idx, key="navtara_birth_nak"
+        )
+    birth_nak_idx = NAKSHATRAS.index(birth_label)
+
+    today_ = date.today()
+    month_opts = []
+    for i in range(12):
+        yy = today_.year + (today_.month - 1 + i) // 12
+        mm_ = (today_.month - 1 + i) % 12 + 1
+        month_opts.append((yy, mm_, datetime(yy, mm_, 1).strftime("%B %Y")))
+    labels = [m[2] for m in month_opts]
+    with col_b:
+        sel_label = st.selectbox("Month", labels, index=0, key="navtara_month")
+    year, month = next((yy, mm_) for yy, mm_, lbl in month_opts if lbl == sel_label)
+    days_in_month = _cal.monthrange(year, month)[1]
+
+    cell_html = ['<div style="display:grid;grid-template-columns:repeat(9,1fr);gap:6px;">']
+    for day in range(1, days_in_month + 1):
+        info = navtara_moon_info(year, month, day, 6.0, tz)
+        t = NAVTARA_INFO[navtara_tara_index(info["nak_idx"], birth_nak_idx)]
+        cell_html.append(
+            f'<div style="background:{t["bg"]};color:{t["fg"]};border-radius:8px;'
+            f'padding:8px 4px;text-align:center;">'
+            f'<p style="font-size:15px;font-weight:700;margin:0;">{day}</p>'
+            f'<p style="font-size:11px;margin:3px 0 0;line-height:1.25;">{NAKSHATRAS_ASCII[info["nak_idx"]]}</p>'
+            f'<p style="font-size:10px;margin:2px 0 0;line-height:1.2;">{t["name"]}</p></div>'
+        )
+    cell_html.append("</div>")
+    st.markdown("".join(cell_html), unsafe_allow_html=True)
+
+    st.markdown(
+        '<div style="display:flex;gap:14px;margin-top:14px;font-size:12px;flex-wrap:wrap;">'
+        '<span><span style="display:inline-block;width:10px;height:10px;background:#173404;'
+        'border-radius:2px;margin-right:5px;"></span>strongly auspicious</span>'
+        '<span><span style="display:inline-block;width:10px;height:10px;background:#C0DD97;'
+        'border-radius:2px;margin-right:5px;"></span>mildly auspicious</span>'
+        '<span><span style="display:inline-block;width:10px;height:10px;background:#F7C1C1;'
+        'border-radius:2px;margin-right:5px;"></span>mildly inauspicious</span>'
+        '<span><span style="display:inline-block;width:10px;height:10px;background:#791F1F;'
+        'border-radius:2px;margin-right:5px;"></span>strongly inauspicious</span>'
+        '</div>', unsafe_allow_html=True,
+    )
+
+    default_day = today_.day if (today_.year == year and today_.month == month) else 1
+    sel_day = st.number_input(
+        "View details for day", min_value=1, max_value=days_in_month,
+        value=default_day, step=1, key="navtara_day",
+    )
+
+    info = navtara_moon_info(year, month, int(sel_day), 6.0, tz)
+    t = NAVTARA_INFO[navtara_tara_index(info["nak_idx"], birth_nak_idx)]
+    paksha, tithi_name = navtara_tithi_info(year, month, int(sel_day), 6.0, tz)
+    dos_html = "".join(f"<p style='margin:0 0 5px;font-size:14px;'>{x}</p>" for x in t["dos"])
+    avoid_html = "".join(f"<p style='margin:0 0 5px;font-size:14px;'>{x}</p>" for x in t["avoids"])
+
+    st.markdown(
+        f"""
+        <div class="kcard" style="margin-top:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+            <p style="font-weight:700;font-size:17px;margin:0;">
+              {datetime(year, month, int(sel_day)).strftime('%B %d, %Y')} — {NAKSHATRAS_ASCII[info['nak_idx']]}</p>
+            <span style="background:{t['bg']};color:{t['fg']};padding:5px 14px;border-radius:6px;
+              font-size:13px;">{t['name']} tara</span>
+          </div>
+          <p style="font-size:15px;color:{C['muted']};margin:10px 0 6px;">{t['meaning']}</p>
+          <p style="font-size:14px;color:{C['muted']};margin:0 0 16px;">{t['significance']}</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:16px;">
+            <div><h4 style="font-size:13px;color:#2f6f1f;margin:0 0 6px;">Favorable for</h4>{dos_html}</div>
+            <div><h4 style="font-size:13px;color:#a3312f;margin:0 0 6px;">Avoid</h4>{avoid_html}</div>
+          </div>
+          <p style="font-size:12px;font-weight:700;color:{C['muted']};margin:0 0 3px;
+            border-top:1px solid {C['line']};padding-top:10px;">NOTE</p>
+          <p style="font-size:14px;margin:0 0 16px;">{t['tip']}</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;
+            border-top:1px solid {C['line']};padding-top:14px;">
+            <div style="background:{C['panelSoft']};border-radius:8px;padding:10px 12px;">
+              <p style="font-size:12px;color:{C['muted']};margin:0 0 2px;">Paksha</p>
+              <p style="font-size:14px;font-weight:600;margin:0;">{paksha} Paksha</p></div>
+            <div style="background:{C['panelSoft']};border-radius:8px;padding:10px 12px;">
+              <p style="font-size:12px;color:{C['muted']};margin:0 0 2px;">Tithi</p>
+              <p style="font-size:14px;font-weight:600;margin:0;">{tithi_name}</p></div>
+            <div style="background:{C['panelSoft']};border-radius:8px;padding:10px 12px;">
+              <p style="font-size:12px;color:{C['muted']};margin:0 0 2px;">Moon sign</p>
+              <p style="font-size:14px;font-weight:600;margin:0;">{SIGNS_ASCII[info['sign_idx']]}</p></div>
+            <div style="background:{C['panelSoft']};border-radius:8px;padding:10px 12px;">
+              <p style="font-size:12px;color:{C['muted']};margin:0 0 2px;">Navamsa pada</p>
+              <p style="font-size:14px;font-weight:600;margin:0;">Pada {info['pada']} — {SIGNS_ASCII[info['pada_sign_idx']]}</p></div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Computed from this app's own Sun/Moon ephemeris for the exact date shown, rather than "
+        "the average-lunar-period projection the original standalone tool used — no anchor date "
+        "or re-projection drift."
+    )
+
+
 # ---- House classification relative to the lagna (1-indexed house numbers) ----
 KENDRA_HOUSES = {1, 4, 7, 10}       # angular — strongest houses
 TRIKONA_HOUSES = {1, 5, 9}          # trine — most auspicious (Dharma trikona)
@@ -2626,8 +2870,8 @@ if is_premium(user_id):
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
-    tab_nav, tab_transit, tab_remedy = st.tabs(
-        ["🪐 Navagraha Wheel", "🔄 Current Transit", "📿 Day-wise Remedies"]
+    tab_nav, tab_transit, tab_remedy, tab_navtara = st.tabs(
+        ["🪐 Navagraha Wheel", "🔄 Current Transit", "📿 Day-wise Remedies", "🌙 Navtara Chakra"]
     )
 
     with tab_nav:
@@ -2683,6 +2927,9 @@ if is_premium(user_id):
             "particular should only be worn after a proper chart analysis, since an unsuitable one "
             "can do more harm than good for some charts."
         )
+
+    with tab_navtara:
+        render_navtara_chakra_tab(b_moon["nakIdx"], tz)
 else:
     st.markdown(
         '<h4>⭐ Go Premium — Get Your Kundali Report</h4>'
