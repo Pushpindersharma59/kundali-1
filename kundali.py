@@ -2870,22 +2870,9 @@ if is_premium(user_id):
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
-    tab_nav, tab_transit, tab_remedy, tab_navtara = st.tabs(
-        ["🪐 Navagraha Wheel", "🔄 Current Transit", "📿 Day-wise Remedies", "🌙 Navtara Chakra"]
+    tab_transit, tab_remedy, tab_navtara = st.tabs(
+        ["🔄 Current Transit", "📿 Day-wise Remedies", "🌙 Navtara Chakra"]
     )
-
-    with tab_nav:
-        nav_svg = build_navagraha_wheel_svg(core_birth_bodies)
-        st.components.v1.html(
-            f'<div style="display:flex;justify-content:center;">{nav_svg}</div>', height=620
-        )
-        st.caption(
-            "The nine grahas at birth, color-coded by classical dignity — "
-            f"<span style='color:{C['gold']};font-weight:700;'>gold = exalted</span>, "
-            f"<span style='color:{C['sindoor']};font-weight:700;'>red = own sign</span>, "
-            f"<span style='color:{C['muted']};font-weight:700;'>grey = debilitated</span>, "
-            "ivory = neutral.", unsafe_allow_html=True,
-        )
 
     with tab_transit:
         st.markdown(f'<p class="kmuted" style="margin-bottom:10px;">As of {transit_label} '
