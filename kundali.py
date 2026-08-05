@@ -1494,6 +1494,31 @@ def graha_dignity(key: str, sign: int) -> str:
     return "Neutral"
 
 
+def nakshatra_lord_relationship_note(graha_key: str, nak_idx: int) -> str:
+    """Classical technique: a graha's nakshatra placement reads more supportive when
+    the nakshatra's ruling lord (from the Vimshottari 9-lord cycle) is a natural
+    friend of that graha, and more challenging when it's a natural enemy - using
+    the same Graha Maitri table as the Planetary Friendship section."""
+    lord_key = DASHA_LORD_SHORT[nak_idx % 9]
+    if graha_key in ("Ra", "Ke"):
+        return ("Rahu/Ketu are shadow points outside the classical friendship scheme "
+                "- read this placement via the sign's dispositor instead.")
+    if lord_key == graha_key:
+        return "Own nakshatra (ruled by itself) - a strong, self-supporting placement."
+    if lord_key in ("Ra", "Ke"):
+        return (f"Nakshatra lord ({BODY_FULLNAME_ASCII[lord_key]}) is a shadow point "
+                "outside the classical friendship scheme - a more unpredictable placement.")
+    rel = GRAHA_MAITRI.get(graha_key)
+    if not rel:
+        return "-"
+    lord_name = BODY_FULLNAME_ASCII[lord_key]
+    if lord_key in rel["friends"]:
+        return f"Nakshatra lord {lord_name} is a natural friend - generally supportive, smoother results."
+    if lord_key in rel["enemies"]:
+        return f"Nakshatra lord {lord_name} is a natural enemy - more friction, mixed or delayed results."
+    return f"Nakshatra lord {lord_name} is neutral - moderate effect, depends on other chart factors."
+
+
 # ---- Day-wise remedies: classical, general associations by weekday/ruling
 # planet. General traditional information, not a personalized prescription —
 # gemstones in particular should only be worn after a proper chart analysis,
@@ -2163,6 +2188,21 @@ def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
         ))
     table(["Graha", "Nakshatra", "Deity", "Symbol"], nak_detail_rows, [34, 42, 46, 48], row_h=6.5)
 
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*GOLD)
+    pdf.cell(0, 6, "Why it helps or challenges (Nakshatra Lord Relationship)", ln=True)
+    pdf.set_font("Helvetica", "", 8.5)
+    for b in core_bodies:
+        note = nakshatra_lord_relationship_note(b["key"], b["nakIdx"])
+        pdf.set_text_color(*IVORY)
+        pdf.set_font("Helvetica", "B", 8.5)
+        pdf.cell(30, 5, BODY_FULLNAME_ASCII.get(b["key"], b["key"]), border=0)
+        pdf.set_font("Helvetica", "", 8.5)
+        pdf.set_text_color(*MUTED)
+        pdf.multi_cell(0, 5, note)
+    pdf.ln(1)
+
     section("Graha Maitri (Classical Planetary Friendship)")
     maitri_rows = []
     for k in ["Su", "Mo", "Ma", "Me", "Jp", "Ve", "Sa"]:
@@ -2252,7 +2292,8 @@ def generate_kundali_html_report(birth_chart, form) -> str:
 
     nak_detail_rows = "".join(
         f"<tr><td>{b['key']}</td><td>{NAKSHATRAS[b['nakIdx']]}</td>"
-        f"<td>{NAKSHATRA_DEITY_ASCII[b['nakIdx']]}</td><td>{NAKSHATRA_SYMBOL_ASCII[b['nakIdx']]}</td></tr>"
+        f"<td>{NAKSHATRA_DEITY_ASCII[b['nakIdx']]}</td><td>{NAKSHATRA_SYMBOL_ASCII[b['nakIdx']]}</td>"
+        f"<td style='font-size:13px;'>{nakshatra_lord_relationship_note(b['key'], b['nakIdx'])}</td></tr>"
         for b in core_bodies
     )
 
@@ -2346,7 +2387,7 @@ def generate_kundali_html_report(birth_chart, form) -> str:
 
   <h2>Nakṣatra Details</h2>
   <table>
-    <tr><th>Graha</th><th>Nakṣatra</th><th>Deity</th><th>Symbol</th></tr>
+    <tr><th>Graha</th><th>Nakṣatra</th><th>Deity</th><th>Symbol</th><th>Significance</th></tr>
     {nak_detail_rows}
   </table>
 
