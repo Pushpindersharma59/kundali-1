@@ -1432,33 +1432,55 @@ FEATURE_STRIP = [
 def render_auth_screen():
     """Full-page login / signup flow. Returns nothing — sets
     st.session_state['user'] and reruns once authenticated."""
+    NAVY = "#1B3A6B"
+    # NASA public-domain image (science.nasa.gov gallery) — free to use, no licensing risk.
+    SATURN_URL = ("https://assets.science.nasa.gov/content/dam/science/psd/solar/internal_resources/"
+                  "730/Saturn_and_its_rings.jpeg/jcr:content/renditions/cq5dam.web.1280.1280.jpeg")
+
     st.markdown(
         f"""
         <style>
-        .hero-tagline {{ letter-spacing: 0.32em; font-size: 13px; color: {C['muted']};
-            text-align: center; margin: 6px 0 0; font-weight: 600; }}
-        .hero-brand {{ text-align: center; color: {C['gold']}; font-family: Georgia, serif;
+        .stApp {{
+            background:
+                radial-gradient(circle at 8% 8%, rgba(255,221,150,0.85) 0%, rgba(255,221,150,0) 32%),
+                radial-gradient(1.6px 1.6px at 18% 14%, #ffffff 100%, transparent),
+                radial-gradient(1.6px 1.6px at 62% 7%, #ffffff 100%, transparent),
+                radial-gradient(1.6px 1.6px at 80% 18%, #ffffff 100%, transparent),
+                radial-gradient(1.6px 1.6px at 40% 22%, #ffffff 100%, transparent),
+                radial-gradient(1.6px 1.6px at 90% 10%, #ffffff 100%, transparent),
+                radial-gradient(1.6px 1.6px at 70% 28%, #ffffff 100%, transparent),
+                radial-gradient(1.6px 1.6px at 30% 5%, #ffffff 100%, transparent),
+                linear-gradient(180deg, #eaf3fb 0%, #f8f1de 55%, #f5e8c3 100%) !important;
+            background-attachment: fixed;
+        }}
+        .hero-tagline {{ letter-spacing: 0.32em; font-size: 13px; color: {NAVY};
+            text-align: center; margin: 6px 0 0; font-weight: 600; opacity: 0.8; }}
+        .hero-brand {{ text-align: center; color: {NAVY}; font-family: Georgia, serif;
             font-size: 46px; letter-spacing: 0.05em; margin: 6px 0 0; font-weight: 700; }}
-        .hero-divider {{ width: 70px; height: 2px; background: {C['gold']}; margin: 16px auto 18px; opacity: 0.6; }}
-        .hero-headline {{ color: {C['ivory']}; font-family: Georgia, serif; font-size: 27px;
+        .hero-divider {{ width: 70px; height: 2px; background: {C['gold']}; margin: 16px auto 18px; opacity: 0.7; }}
+        .hero-headline {{ color: {NAVY}; font-family: Georgia, serif; font-size: 27px;
             font-weight: 700; text-align: center; margin: 0 0 10px; }}
         .hero-desc {{ color: {C['muted']}; text-align: center; font-size: 15px; line-height: 1.5;
             max-width: 420px; margin: 0 auto 22px; }}
         .welcome-back {{ color: {C['gold']}; letter-spacing: 0.18em; font-size: 13px; font-weight: 700;
             text-align: center; margin: 4px 0 12px; }}
         div[data-testid="stTabs"] {{
-            background: {C['panel']}; border: 1px solid {C['line']}; border-radius: 16px;
-            padding: 8px 26px 22px; box-shadow: 0 4px 18px rgba(58,46,31,0.10); max-width: 440px;
+            background: rgba(255,255,255,0.88); border: 1px solid {C['line']}; border-radius: 16px;
+            padding: 8px 26px 22px; box-shadow: 0 8px 26px rgba(27,58,107,0.14); max-width: 440px;
             margin: 0 auto;
         }}
-        div[data-testid="stTabs"] button[role="tab"] {{ font-weight: 700; letter-spacing: 0.04em; }}
+        div[data-testid="stTabs"] button[role="tab"] {{ font-weight: 700; letter-spacing: 0.04em; color: {NAVY}; }}
+        div[data-testid="stTabs"] .stButton button {{
+            background: {NAVY} !important; color: #fff !important; border: none !important;
+            font-weight: 700; letter-spacing: 0.05em;
+        }}
         .feature-strip {{
-            background: {C['panel']}; border: 1px solid {C['line']}; border-radius: 18px;
-            padding: 26px 20px 10px; margin-top: 36px; box-shadow: 0 2px 10px rgba(58,46,31,0.06);
+            background: rgba(255,255,255,0.92); border: 1px solid {C['line']}; border-radius: 18px;
+            padding: 26px 20px 10px; margin-top: 36px; box-shadow: 0 4px 16px rgba(27,58,107,0.08);
         }}
         .feature-item {{ text-align: center; padding-bottom: 22px; }}
         .feature-icon {{ font-size: 30px; margin-bottom: 8px; }}
-        .feature-title {{ color: {C['gold']}; font-weight: 700; font-size: 14px; letter-spacing: 0.03em;
+        .feature-title {{ color: {NAVY}; font-weight: 700; font-size: 14px; letter-spacing: 0.03em;
             text-transform: uppercase; margin-bottom: 4px; }}
         .feature-desc {{ color: {C['muted']}; font-size: 12.5px; line-height: 1.4; }}
         </style>
@@ -1469,7 +1491,10 @@ def render_auth_screen():
     hero_l, hero_r = st.columns([1.05, 1])
 
     with hero_l:
-        st.markdown(build_compass_star_svg(84), unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="max-width:84px;margin:0 auto;">{build_compass_star_svg(84)}</div>',
+            unsafe_allow_html=True,
+        )
         st.markdown('<p class="hero-brand">Kuṇḍalī</p>', unsafe_allow_html=True)
         st.markdown('<p class="hero-tagline">DISCOVER &middot; REFLECT &middot; GROW</p>', unsafe_allow_html=True)
         st.markdown('<div class="hero-divider"></div>', unsafe_allow_html=True)
@@ -1525,7 +1550,24 @@ def render_auth_screen():
                         st.success("Account created — you can sign in now.")
 
     with hero_r:
-        st.markdown(build_zodiac_hero_svg(440), unsafe_allow_html=True)
+        wheel_svg = build_zodiac_hero_svg(440)
+        st.markdown(
+            f"""
+            <div style="position:relative; max-width:520px; margin:0 auto;">
+                {wheel_svg}
+                <img src="{SATURN_URL}" alt="Saturn"
+                     style="position:absolute; top:2%; right:4%; width:15%; aspect-ratio:1/1;
+                            object-fit:cover; border-radius:50%; border:3px solid {NAVY};
+                            box-shadow:0 8px 20px rgba(27,58,107,0.3);" />
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<p style="text-align:center; font-size:11px; color:{C["muted"]}; margin-top:6px;">'
+            'Saturn — courtesy NASA/JPL-Caltech (public domain)</p>',
+            unsafe_allow_html=True,
+        )
 
     feature_html = ['<div class="feature-strip"><div style="display:grid;'
                      'grid-template-columns:repeat(4,1fr);gap:6px;">']
