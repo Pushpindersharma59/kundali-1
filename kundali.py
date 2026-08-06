@@ -1008,6 +1008,8 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL,
             username_lower TEXT UNIQUE NOT NULL,
+            email TEXT,
+            email_lower TEXT,
             pw_hash TEXT NOT NULL,
             pw_salt TEXT NOT NULL,
             created_at REAL NOT NULL
@@ -1023,45 +1025,14 @@ def init_db():
         )
     """)
 
-    # ---- Migration: an older deployment may have created "users" before the
-    # email-verification columns were removed. CREATE TABLE IF NOT EXISTS
-    # above is a no-op on an existing table, so detect and fix it here
-    # instead of crashing on a missing column / stale NOT NULL constraint.
+    # ---- Migration: bring an existing "users" table up to the current schema
+    # (username_lower for case-insensitive login, email/email_lower for
+    # account recovery). Nullable columns only — SQLite can't add a NOT NULL
+    # column with no default to a table that already has rows.
     cols_info = conn.execute("PRAGMA table_info(users)").fetchall()
     existing_cols = {row["name"] for row in cols_info}
-    has_old_columns = "email" in existing_cols or "verified" in existing_cols
-    missing_username_lower = "username_lower" not in existing_cols
 
-    if has_old_columns:
-        # Old schema had NOT NULL columns (e.g. email) we no longer populate,
-        # so patch that table won't work — rebuild it from scratch, keeping
-        # id/username/pw_hash/pw_salt/created_at from whatever accounts exist.
-        conn.execute("ALTER TABLE users RENAME TO users_old")
-        conn.execute("""
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL,
-                username_lower TEXT UNIQUE NOT NULL,
-                pw_hash TEXT NOT NULL,
-                pw_salt TEXT NOT NULL,
-                created_at REAL NOT NULL
-            )
-        """)
-        old_rows = conn.execute("SELECT * FROM users_old ORDER BY id").fetchall()
-        seen_lower = set()
-        for r in old_rows:
-            uname = r["username"]
-            uname_lower = uname.lower()
-            if uname_lower in seen_lower:
-                continue  # skip case-collision duplicates, keep the earliest account
-            seen_lower.add(uname_lower)
-            conn.execute(
-                "INSERT INTO users (id, username, username_lower, pw_hash, pw_salt, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (r["id"], uname, uname_lower, r["pw_hash"], r["pw_salt"], r["created_at"]),
-            )
-        conn.execute("DROP TABLE users_old")
-    elif missing_username_lower:
+    if "username_lower" not in existing_cols:
         conn.execute("ALTER TABLE users ADD COLUMN username_lower TEXT")
         conn.execute("UPDATE users SET username_lower = lower(username) WHERE username_lower IS NULL")
         dupes = conn.execute("""
@@ -1076,6 +1047,29 @@ def init_db():
             for extra_id in ids[1:]:
                 conn.execute("DELETE FROM users WHERE id=?", (extra_id,))
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users(username_lower)")
+
+    if "email" not in existing_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    if "email_lower" not in existing_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN email_lower TEXT")
+        conn.execute("UPDATE users SET email_lower = lower(email) WHERE email IS NOT NULL AND email_lower IS NULL")
+    # De-dupe any pre-existing collisions before adding the unique index, else the
+    # CREATE UNIQUE INDEX call itself would fail.
+    email_dupes = conn.execute("""
+        SELECT email_lower FROM users
+        WHERE email_lower IS NOT NULL AND email_lower != ''
+        GROUP BY email_lower HAVING COUNT(*) > 1
+    """).fetchall()
+    for row in email_dupes:
+        ids = [r["id"] for r in conn.execute(
+            "SELECT id FROM users WHERE email_lower=? ORDER BY id", (row["email_lower"],)
+        ).fetchall()]
+        for extra_id in ids[1:]:
+            conn.execute("UPDATE users SET email=NULL, email_lower=NULL WHERE id=?", (extra_id,))
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users(email_lower) "
+        "WHERE email_lower IS NOT NULL AND email_lower != ''"
+    )
 
     # ---- Migration: add is_premium if this DB predates the premium feature.
     cols_now = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
@@ -1130,6 +1124,9 @@ def check_password(password: str, salt_hex: str, stored_hash: str) -> bool:
     return hmac.compare_digest(digest, stored_hash)
 
 
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
 def username_taken(username: str) -> bool:
     conn = get_conn()
     row = conn.execute(
@@ -1139,33 +1136,47 @@ def username_taken(username: str) -> bool:
     return row is not None
 
 
-def create_user(username: str, password: str):
-    """Returns (ok, message)."""
+def email_taken(email: str) -> bool:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT 1 FROM users WHERE email_lower=?", (email.lower(),)
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def create_user(username: str, password: str, email: str = ""):
+    """Returns (ok, message). Email is optional but, if given, must be unique."""
     conn = get_conn()
     pw_hash, pw_salt = hash_password(password)
+    email_clean = email.strip() or None
+    email_lower = email_clean.lower() if email_clean else None
     try:
         conn.execute(
-            "INSERT INTO users (username, username_lower, pw_hash, pw_salt, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (username, username.lower(), pw_hash, pw_salt, time.time()),
+            "INSERT INTO users (username, username_lower, email, email_lower, pw_hash, pw_salt, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (username, username.lower(), email_clean, email_lower, pw_hash, pw_salt, time.time()),
         )
         conn.commit()
         return True, ""
     except sqlite3.IntegrityError:
+        if email_lower and email_taken(email):
+            return False, "That email is already registered — try logging in instead."
         return False, "That username is already taken — pick another one."
     finally:
         conn.close()
 
 
-def authenticate(username: str, password: str):
-    """Returns (user_dict_or_None, message)."""
+def authenticate(identifier: str, password: str):
+    """Returns (user_dict_or_None, message). Accepts either username or email."""
     conn = get_conn()
+    ident_lower = identifier.lower()
     row = conn.execute(
-        "SELECT * FROM users WHERE username_lower=?", (username.lower(),)
+        "SELECT * FROM users WHERE username_lower=? OR email_lower=?", (ident_lower, ident_lower)
     ).fetchone()
     conn.close()
     if row is None:
-        return None, "No account with that username."
+        return None, "No account with that username or email."
     if not check_password(password, row["pw_salt"], row["pw_hash"]):
         return None, "Incorrect password."
     return dict(row), ""
@@ -1509,11 +1520,11 @@ def render_auth_screen():
         tab_login, tab_signup = st.tabs(["SIGN IN", "NEW SIGN UP"])
 
         with tab_login:
-            identifier = st.text_input("Username", key="login_identifier", placeholder="User Name")
+            identifier = st.text_input("Username or Email", key="login_identifier", placeholder="User Name or Email")
             password = st.text_input("Password", type="password", key="login_password", placeholder="Password")
             if st.button("Sign In", use_container_width=True, key="signin_btn"):
                 if not identifier or not password:
-                    st.error("Enter your username and password.")
+                    st.error("Enter your username/email and password.")
                 else:
                     user, msg = authenticate(identifier.strip(), password)
                     if user:
@@ -1524,6 +1535,7 @@ def render_auth_screen():
 
         with tab_signup:
             su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
+            su_email = st.text_input("Email", key="su_email", placeholder="you@example.com")
             su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
             su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
             su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
@@ -1533,6 +1545,10 @@ def render_auth_screen():
                     errors.append("Username must be 3-20 characters: letters, numbers, underscore only.")
                 elif username_taken(su_username):
                     errors.append("That username is already taken — pick another one.")
+                if not EMAIL_RE.match(su_email or ""):
+                    errors.append("Enter a valid email address.")
+                elif email_taken(su_email):
+                    errors.append("That email is already registered — try signing in instead.")
                 if len(su_pw or "") < 8:
                     errors.append("Password must be at least 8 characters.")
                 if su_pw != su_pw2:
@@ -1543,7 +1559,7 @@ def render_auth_screen():
                     for e in errors:
                         st.error(e)
                 else:
-                    ok, msg = create_user(su_username.strip(), su_pw)
+                    ok, msg = create_user(su_username.strip(), su_pw, su_email.strip())
                     if not ok:
                         st.error(msg)
                     else:
