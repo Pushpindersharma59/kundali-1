@@ -1167,16 +1167,15 @@ def create_user(username: str, password: str, email: str = ""):
         conn.close()
 
 
-def authenticate(identifier: str, password: str):
-    """Returns (user_dict_or_None, message). Accepts either username or email."""
+def authenticate(username: str, password: str):
+    """Returns (user_dict_or_None, message)."""
     conn = get_conn()
-    ident_lower = identifier.lower()
     row = conn.execute(
-        "SELECT * FROM users WHERE username_lower=? OR email_lower=?", (ident_lower, ident_lower)
+        "SELECT * FROM users WHERE username_lower=?", (username.lower(),)
     ).fetchone()
     conn.close()
     if row is None:
-        return None, "No account with that username or email."
+        return None, "No account with that username."
     if not check_password(password, row["pw_salt"], row["pw_hash"]):
         return None, "Incorrect password."
     return dict(row), ""
@@ -1520,11 +1519,11 @@ def render_auth_screen():
         tab_login, tab_signup = st.tabs(["SIGN IN", "NEW SIGN UP"])
 
         with tab_login:
-            identifier = st.text_input("Username or Email", key="login_identifier", placeholder="User Name or Email")
+            identifier = st.text_input("Username", key="login_identifier", placeholder="User Name")
             password = st.text_input("Password", type="password", key="login_password", placeholder="Password")
             if st.button("Sign In", use_container_width=True, key="signin_btn"):
                 if not identifier or not password:
-                    st.error("Enter your username/email and password.")
+                    st.error("Enter your username and password.")
                 else:
                     user, msg = authenticate(identifier.strip(), password)
                     if user:
@@ -1535,7 +1534,6 @@ def render_auth_screen():
 
         with tab_signup:
             su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
-            su_email = st.text_input("Email", key="su_email", placeholder="you@example.com")
             su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
             su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
             su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
@@ -1545,10 +1543,6 @@ def render_auth_screen():
                     errors.append("Username must be 3-20 characters: letters, numbers, underscore only.")
                 elif username_taken(su_username):
                     errors.append("That username is already taken — pick another one.")
-                if not EMAIL_RE.match(su_email or ""):
-                    errors.append("Enter a valid email address.")
-                elif email_taken(su_email):
-                    errors.append("That email is already registered — try signing in instead.")
                 if len(su_pw or "") < 8:
                     errors.append("Password must be at least 8 characters.")
                 if su_pw != su_pw2:
@@ -1559,7 +1553,7 @@ def render_auth_screen():
                     for e in errors:
                         st.error(e)
                 else:
-                    ok, msg = create_user(su_username.strip(), su_pw, su_email.strip())
+                    ok, msg = create_user(su_username.strip(), su_pw)
                     if not ok:
                         st.error(msg)
                     else:
