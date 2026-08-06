@@ -1332,62 +1332,211 @@ def seed_premium_demo_account():
 seed_premium_demo_account()
 
 
+def build_zodiac_hero_svg(size: int = 460) -> str:
+    """Purely decorative zodiac wheel for the login page hero — not tied to any
+    chart data, just branding. Zodiac glyphs are standard Unicode astrological
+    symbols (near-universal font support); the center uses a hand-drawn lotus
+    mandala rather than the Devanagari Om character, since that glyph isn't
+    reliably available in every browser/OS font stack."""
+    pad = size * 0.06
+    vb = size + pad * 2
+    cx = cy = vb / 2
+    R_outer = size * 0.44
+    R_mid = size * 0.34
+    R_inner = size * 0.14
+    zodiac = ["\u2648", "\u2649", "\u264a", "\u264b", "\u264c", "\u264d",
+              "\u264e", "\u264f", "\u2650", "\u2651", "\u2652", "\u2653"]
+    names = ["ARIES", "TAURUS", "GEMINI", "CANCER", "LEO", "VIRGO", "LIBRA",
+              "SCORPIO", "SAGITTARIUS", "CAPRICORN", "AQUARIUS", "PISCES"]
+
+    def pt(r, deg):
+        rad = math.radians(deg - 90)
+        return cx + r * math.cos(rad), cy + r * math.sin(rad)
+
+    parts = [
+        f'<svg viewBox="0 0 {vb} {vb}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">',
+        '<defs><radialGradient id="zodiacGlow" cx="50%" cy="50%" r="60%">'
+        '<stop offset="0%" stop-color="#FFFDF3"/><stop offset="100%" stop-color="#FFF0AE"/>'
+        '</radialGradient></defs>',
+        f'<circle cx="{cx}" cy="{cy}" r="{R_outer}" fill="url(#zodiacGlow)" stroke="#B8842E" stroke-width="2.5"/>',
+        f'<circle cx="{cx}" cy="{cy}" r="{R_mid}" fill="none" stroke="#B8842E" stroke-width="1" opacity="0.55"/>',
+    ]
+    for i in range(12):
+        boundary = i * 30
+        x1, y1 = pt(R_mid, boundary)
+        x2, y2 = pt(R_outer, boundary)
+        parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+                      f'stroke="#B8842E" stroke-width="1" opacity="0.5"/>')
+        gx, gy = pt((R_outer + R_mid) / 2 + 4, boundary + 15)
+        parts.append(f'<text x="{gx:.1f}" y="{gy:.1f}" text-anchor="middle" dominant-baseline="middle" '
+                      f'font-size="{size*0.048}" fill="#B8842E">{zodiac[i]}</text>')
+        nx, ny = pt(R_outer + size * 0.05, boundary + 15)
+        parts.append(f'<text x="{nx:.1f}" y="{ny:.1f}" text-anchor="middle" dominant-baseline="middle" '
+                      f'font-size="{size*0.019}" letter-spacing="1" fill="#8a6a35" '
+                      f'font-family="Georgia, serif">{names[i]}</text>')
+    for i in range(60):
+        ang = i * 6
+        x1, y1 = pt(R_mid, ang)
+        x2, y2 = pt(R_mid - size * 0.012, ang)
+        parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#B8842E" '
+                      f'stroke-width="0.7" opacity="0.4"/>')
+
+    # center: hand-drawn lotus mandala (font-independent) instead of an Om glyph
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_inner}" fill="#FFFDF3" stroke="#B8842E" stroke-width="2"/>')
+    petal_r_mid = R_inner * 0.6
+    petal_r = R_inner * 0.24
+    for i in range(8):
+        ang = math.radians(i * 45)
+        px = cx + petal_r_mid * 0.55 * math.sin(ang)
+        py = cy - petal_r_mid * 0.55 * math.cos(ang)
+        parts.append(
+            f'<ellipse cx="{px:.1f}" cy="{py:.1f}" rx="{petal_r:.1f}" ry="{petal_r*1.6:.1f}" '
+            f'transform="rotate({i*45} {px:.1f} {py:.1f})" fill="none" stroke="#B8842E" stroke-width="2.5"/>'
+        )
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_inner*0.62}" fill="none" stroke="#B8842E" stroke-width="1.5"/>')
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_inner*0.14}" fill="#B8842E"/>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def build_compass_star_svg(size: int = 90) -> str:
+    """Small decorative compass-star mark used above the brand wordmark."""
+    cx = cy = size / 2
+    r_out, r_in = size * 0.46, size * 0.16
+    pts = []
+    for i in range(16):
+        ang = math.radians(i * 22.5 - 90)
+        r = r_out if i % 2 == 0 else r_out * 0.42
+        pts.append(f"{cx + r*math.cos(ang):.1f},{cy + r*math.sin(ang):.1f}")
+    return (
+        f'<svg viewBox="0 0 {size} {size}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">'
+        f'<circle cx="{cx}" cy="{cy}" r="{r_out+8}" fill="none" stroke="#B8842E" stroke-width="1.5" opacity="0.6"/>'
+        f'<polygon points="{" ".join(pts)}" fill="none" stroke="#B8842E" stroke-width="2"/>'
+        f'<circle cx="{cx}" cy="{cy}" r="{r_in*0.5}" fill="#B8842E"/>'
+        f'</svg>'
+    )
+
+
+FEATURE_STRIP = [
+    ("\U0001fa90", "Kundali Analysis", "Detailed insights from your real birth chart"),
+    ("\u263e", "Nakshatra Guide", "27 nakshatras — deities, symbols & meanings"),
+    ("\U0001fa90", "Planetary Transits", "Live planetary movements, updated in real time"),
+    ("\u2295", "Divisional Charts", "D1 through D60 varga charts, generated instantly"),
+    ("\U0001f4c5", "Navtara Chakra", "Auspicious-day calendar based on your own nakshatra"),
+    ("\u26a1", "Graha Maitri & Trikona", "Planetary friendships and house groupings by element"),
+    ("\U0001f48e", "Day-wise Remedies", "Gemstones, colours & practices for each weekday"),
+    ("\U0001f4c4", "PDF Report", "A downloadable, professional Kundali report"),
+]
+
+
 def render_auth_screen():
     """Full-page login / signup flow. Returns nothing — sets
     st.session_state['user'] and reruns once authenticated."""
     st.markdown(
-        f'<h1 style="color:{C["gold"]}; font-family:Georgia, serif; letter-spacing:0.06em;">Kuṇḍalī</h1>'
-        f'<p class="kmuted" style="margin-top:-10px; font-size:16px;">Sign in to save your birth details '
-        f'and come back to them anytime.</p>',
+        f"""
+        <style>
+        .hero-tagline {{ letter-spacing: 0.32em; font-size: 13px; color: {C['muted']};
+            text-align: center; margin: 6px 0 0; font-weight: 600; }}
+        .hero-brand {{ text-align: center; color: {C['gold']}; font-family: Georgia, serif;
+            font-size: 46px; letter-spacing: 0.05em; margin: 6px 0 0; font-weight: 700; }}
+        .hero-divider {{ width: 70px; height: 2px; background: {C['gold']}; margin: 16px auto 18px; opacity: 0.6; }}
+        .hero-headline {{ color: {C['ivory']}; font-family: Georgia, serif; font-size: 27px;
+            font-weight: 700; text-align: center; margin: 0 0 10px; }}
+        .hero-desc {{ color: {C['muted']}; text-align: center; font-size: 15px; line-height: 1.5;
+            max-width: 420px; margin: 0 auto 22px; }}
+        .welcome-back {{ color: {C['gold']}; letter-spacing: 0.18em; font-size: 13px; font-weight: 700;
+            text-align: center; margin: 4px 0 12px; }}
+        div[data-testid="stTabs"] {{
+            background: {C['panel']}; border: 1px solid {C['line']}; border-radius: 16px;
+            padding: 8px 26px 22px; box-shadow: 0 4px 18px rgba(58,46,31,0.10); max-width: 440px;
+            margin: 0 auto;
+        }}
+        div[data-testid="stTabs"] button[role="tab"] {{ font-weight: 700; letter-spacing: 0.04em; }}
+        .feature-strip {{
+            background: {C['panel']}; border: 1px solid {C['line']}; border-radius: 18px;
+            padding: 26px 20px 10px; margin-top: 36px; box-shadow: 0 2px 10px rgba(58,46,31,0.06);
+        }}
+        .feature-item {{ text-align: center; padding-bottom: 22px; }}
+        .feature-icon {{ font-size: 30px; margin-bottom: 8px; }}
+        .feature-title {{ color: {C['gold']}; font-weight: 700; font-size: 14px; letter-spacing: 0.03em;
+            text-transform: uppercase; margin-bottom: 4px; }}
+        .feature-desc {{ color: {C['muted']}; font-size: 12.5px; line-height: 1.4; }}
+        </style>
+        """,
         unsafe_allow_html=True,
     )
 
-    tab_login, tab_signup = st.tabs(["Log in", "Sign up"])
+    hero_l, hero_r = st.columns([1.05, 1])
 
-    with tab_login:
-        st.markdown('<div class="kcard" style="max-width:440px;">', unsafe_allow_html=True)
-        identifier = st.text_input("Username", key="login_identifier")
-        password = st.text_input("Password", type="password", key="login_password")
-        if st.button("Log in", use_container_width=True):
-            if not identifier or not password:
-                st.error("Enter your username and password.")
-            else:
-                user, msg = authenticate(identifier.strip(), password)
-                if user:
-                    st.session_state["user"] = {"id": user["id"], "username": user["username"]}
-                    st.rerun()
-                else:
-                    st.error(msg)
-        st.markdown("</div>", unsafe_allow_html=True)
+    with hero_l:
+        st.markdown(build_compass_star_svg(84), unsafe_allow_html=True)
+        st.markdown('<p class="hero-brand">Kuṇḍalī</p>', unsafe_allow_html=True)
+        st.markdown('<p class="hero-tagline">DISCOVER &middot; REFLECT &middot; GROW</p>', unsafe_allow_html=True)
+        st.markdown('<div class="hero-divider"></div>', unsafe_allow_html=True)
+        st.markdown('<p class="hero-headline">Your Birth Chart Awaits</p>', unsafe_allow_html=True)
+        st.markdown(
+            '<p class="hero-desc">Explore Vedic astrology, nakṣatras, divisional charts, live '
+            'planetary transits, and more — every calculation powered by real astronomy.</p>',
+            unsafe_allow_html=True,
+        )
+        st.markdown('<p class="welcome-back">WELCOME BACK</p>', unsafe_allow_html=True)
 
-    with tab_signup:
-        st.markdown('<div class="kcard" style="max-width:440px;">', unsafe_allow_html=True)
-        su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
-        su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
-        su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
-        su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
-        if st.button("Create account", use_container_width=True):
-            errors = []
-            if not USERNAME_RE.match(su_username or ""):
-                errors.append("Username must be 3-20 characters: letters, numbers, underscore only.")
-            elif username_taken(su_username):
-                errors.append("That username is already taken — pick another one.")
-            if len(su_pw or "") < 8:
-                errors.append("Password must be at least 8 characters.")
-            if su_pw != su_pw2:
-                errors.append("Passwords don't match.")
-            if not su_terms:
-                errors.append("You must agree to the Terms of Service and Privacy Policy.")
-            if errors:
-                for e in errors:
-                    st.error(e)
-            else:
-                ok, msg = create_user(su_username.strip(), su_pw)
-                if not ok:
-                    st.error(msg)
+        tab_login, tab_signup = st.tabs(["SIGN IN", "NEW SIGN UP"])
+
+        with tab_login:
+            identifier = st.text_input("Username", key="login_identifier", placeholder="User Name")
+            password = st.text_input("Password", type="password", key="login_password", placeholder="Password")
+            if st.button("Sign In", use_container_width=True, key="signin_btn"):
+                if not identifier or not password:
+                    st.error("Enter your username and password.")
                 else:
-                    st.success("Account created — you can log in now.")
-        st.markdown("</div>", unsafe_allow_html=True)
+                    user, msg = authenticate(identifier.strip(), password)
+                    if user:
+                        st.session_state["user"] = {"id": user["id"], "username": user["username"]}
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+        with tab_signup:
+            su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
+            su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
+            su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
+            su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
+            if st.button("Create account", use_container_width=True, key="signup_btn"):
+                errors = []
+                if not USERNAME_RE.match(su_username or ""):
+                    errors.append("Username must be 3-20 characters: letters, numbers, underscore only.")
+                elif username_taken(su_username):
+                    errors.append("That username is already taken — pick another one.")
+                if len(su_pw or "") < 8:
+                    errors.append("Password must be at least 8 characters.")
+                if su_pw != su_pw2:
+                    errors.append("Passwords don't match.")
+                if not su_terms:
+                    errors.append("You must agree to the Terms of Service and Privacy Policy.")
+                if errors:
+                    for e in errors:
+                        st.error(e)
+                else:
+                    ok, msg = create_user(su_username.strip(), su_pw)
+                    if not ok:
+                        st.error(msg)
+                    else:
+                        st.success("Account created — you can sign in now.")
+
+    with hero_r:
+        st.markdown(build_zodiac_hero_svg(440), unsafe_allow_html=True)
+
+    feature_html = ['<div class="feature-strip"><div style="display:grid;'
+                     'grid-template-columns:repeat(4,1fr);gap:6px;">']
+    for icon, title, desc in FEATURE_STRIP:
+        feature_html.append(
+            f'<div class="feature-item"><div class="feature-icon">{icon}</div>'
+            f'<div class="feature-title">{title}</div>'
+            f'<div class="feature-desc">{desc}</div></div>'
+        )
+    feature_html.append("</div></div>")
+    st.markdown("".join(feature_html), unsafe_allow_html=True)
 
 
 # ============================================================
