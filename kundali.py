@@ -1869,6 +1869,32 @@ def _house_tags(house_num: int) -> list:
     return tags
 
 
+TRIKONA_GROUP_HOUSES = {
+    "Dharma Trikona (Fire)": (1, 5, 9),
+    "Artha Trikona (Earth)": (2, 6, 10),
+    "Kama Trikona (Air)": (3, 7, 11),
+    "Moksha Trikona (Water)": (4, 8, 12),
+}
+
+
+def planets_by_trikona_group(bodies: list, asc_sign: int) -> dict:
+    """Groups grahas (excludes the Ascendant point itself) by which Trikona
+    element their occupied house belongs to, each list sorted ascending by
+    degree-in-sign."""
+    result = {name: [] for name in TRIKONA_GROUP_HOUSES}
+    for b in bodies:
+        if b["key"] == "As":
+            continue
+        house_num = ((b["sign"] - asc_sign) % 12) + 1
+        for group_name, houses in TRIKONA_GROUP_HOUSES.items():
+            if house_num in houses:
+                result[group_name].append(b)
+                break
+    for entries in result.values():
+        entries.sort(key=lambda b: b["inSign"])
+    return result
+
+
 # ---- Simple Muhurta helpers: sunrise/sunset -> Rahu Kalam, Yamaganda, Gulika
 # Kalam (inauspicious periods to avoid for new beginnings) and Abhijit Muhurta
 # (the auspicious window straddling local solar noon). These are the classical
@@ -2246,6 +2272,24 @@ def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
         "Kama/Moksha), each tied to one element: 1,5,9 = Fire; 2,6,10 = Earth; "
         "3,7,11 = Air; 4,8,12 = Water.")
 
+    section("Grahas by Trikona Group (ascending by degree)")
+    trikona_planets = planets_by_trikona_group(core_bodies, b_asc["sign"])
+    for group_name, entries in trikona_planets.items():
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*GOLD)
+        pdf.cell(0, 6.5, group_name, ln=True)
+        pdf.set_font("Helvetica", "", 9.5)
+        pdf.set_text_color(*IVORY)
+        if entries:
+            line = ", ".join(
+                f'{_ascii_key(b["key"])} {int(b["inSign"])}\u00b0 ({SIGNS_ASCII[b["sign"]]})'
+                for b in entries
+            )
+        else:
+            line = "No grahas placed in this group's houses."
+        pdf.multi_cell(0, 5, line)
+        pdf.ln(2)
+
     section("Muhurta - Auspicious & Inauspicious Timings (birth date)")
     lat_, lon_, tz_ = form["city"][2], form["city"][3], form["city"][4]
     mw = compute_muhurta_windows(form["dob"].year, form["dob"].month, form["dob"].day, lat_, lon_, tz_)
@@ -2324,6 +2368,22 @@ def generate_kundali_html_report(birth_chart, form) -> str:
         f"<tr><td>{h}</td><td>{SIGNS[(b_asc['sign'] + h - 1) % 12]}</td>"
         f"<td>{', '.join(_house_tags(h)) or '—'}</td><td>{HOUSE_TRIKONA_GROUP[h]}</td></tr>"
         for h in range(1, 13)
+    )
+
+    _trikona_planets = planets_by_trikona_group(core_bodies, b_asc["sign"])
+
+    def _trikona_cell(entries):
+        if not entries:
+            return "—"
+        parts = []
+        for b in entries:
+            parts.append(f'{b["key"]} {int(b["inSign"])}\u00b0 ({SIGNS[b["sign"]]})')
+        return ", ".join(parts)
+
+    trikona_group_rows = "".join(
+        f"<tr><td class='k' style='width:35%;'>{group_name}</td>"
+        f"<td>{_trikona_cell(entries)}</td></tr>"
+        for group_name, entries in _trikona_planets.items()
     )
 
     _lat, _lon, _tz = form["city"][2], form["city"][3], form["city"][4]
@@ -2422,6 +2482,12 @@ def generate_kundali_html_report(birth_chart, form) -> str:
   most auspicious. Upachaya (3,6,10,11) = grow stronger over time. Dusthāna (6,8,12) = difficult houses.
   Trikoṇa Group = the four goals-of-life groupings (Dharma/Artha/Kāma/Mokṣa), each tied to one element:
   1,5,9 = Fire; 2,6,10 = Earth; 3,7,11 = Air; 4,8,12 = Water.</p>
+
+  <h2>Grahas by Trikoṇa Group (ascending by degree)</h2>
+  <table>
+    <tr><th>Trikoṇa Group</th><th>Grahas</th></tr>
+    {trikona_group_rows}
+  </table>
 
   <h2>Muhūrta · Timings on the Birth Date</h2>
   <table>
