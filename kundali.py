@@ -1344,18 +1344,24 @@ seed_premium_demo_account()
 
 def build_zodiac_hero_svg(size: int = 460) -> str:
     """Purely decorative zodiac wheel for the login page hero — not tied to any
-    chart data, just branding. Zodiac glyphs are standard Unicode astrological
-    symbols (near-universal font support); the center uses a hand-drawn lotus
-    mandala rather than the Devanagari Om character, since that glyph isn't
-    reliably available in every browser/OS font stack."""
+    chart data, just branding. The zodiac glyphs are standard Unicode
+    astrological symbols, each suffixed with U+FE0E (the 'text presentation'
+    variation selector) — without it, some browsers/OS combinations render
+    these as colourful emoji icons with a background box instead of plain
+    gold text, which is the purple-square glitch seen in testing. The center
+    uses a hand-drawn lotus mandala over radiating sunburst rays rather than
+    the Devanagari Om character, since that glyph isn't reliably available in
+    every browser/OS font stack."""
     pad = size * 0.06
     vb = size + pad * 2
     cx = cy = vb / 2
     R_outer = size * 0.44
     R_mid = size * 0.34
     R_inner = size * 0.14
-    zodiac = ["\u2648", "\u2649", "\u264a", "\u264b", "\u264c", "\u264d",
-              "\u264e", "\u264f", "\u2650", "\u2651", "\u2652", "\u2653"]
+    VS = "\ufe0e"  # text-presentation variation selector
+    zodiac = [c + VS for c in
+              ["\u2648", "\u2649", "\u264a", "\u264b", "\u264c", "\u264d",
+               "\u264e", "\u264f", "\u2650", "\u2651", "\u2652", "\u2653"]]
     names = ["ARIES", "TAURUS", "GEMINI", "CANCER", "LEO", "VIRGO", "LIBRA",
               "SCORPIO", "SAGITTARIUS", "CAPRICORN", "AQUARIUS", "PISCES"]
 
@@ -1367,6 +1373,11 @@ def build_zodiac_hero_svg(size: int = 460) -> str:
         f'<svg viewBox="0 0 {vb} {vb}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">',
         '<defs><radialGradient id="zodiacGlow" cx="50%" cy="50%" r="60%">'
         '<stop offset="0%" stop-color="#FFFDF3"/><stop offset="100%" stop-color="#FFF0AE"/>'
+        '</radialGradient>'
+        '<radialGradient id="sunGlow" cx="50%" cy="50%" r="50%">'
+        '<stop offset="0%" stop-color="#FFF6D8" stop-opacity="0.95"/>'
+        '<stop offset="70%" stop-color="#FFE9A8" stop-opacity="0.35"/>'
+        '<stop offset="100%" stop-color="#FFE9A8" stop-opacity="0"/>'
         '</radialGradient></defs>',
         f'<circle cx="{cx}" cy="{cy}" r="{R_outer}" fill="url(#zodiacGlow)" stroke="#B8842E" stroke-width="2.5"/>',
         f'<circle cx="{cx}" cy="{cy}" r="{R_mid}" fill="none" stroke="#B8842E" stroke-width="1" opacity="0.55"/>',
@@ -1391,7 +1402,19 @@ def build_zodiac_hero_svg(size: int = 460) -> str:
         parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#B8842E" '
                       f'stroke-width="0.7" opacity="0.4"/>')
 
-    # center: hand-drawn lotus mandala (font-independent) instead of an Om glyph
+    # sunburst glow + radiating rays behind the center, then the lotus mandala
+    # on top (font-independent) instead of an Om glyph
+    glow_r = R_inner * 2.3
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{glow_r}" fill="url(#sunGlow)"/>')
+    n_rays = 32
+    for i in range(n_rays):
+        ang = i * (360 / n_rays)
+        r1 = R_inner * 1.05
+        r2 = R_inner * (1.9 if i % 2 == 0 else 1.55)
+        x1, y1 = pt(r1, ang)
+        x2, y2 = pt(r2, ang)
+        parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+                      f'stroke="#D8A845" stroke-width="1.5" opacity="0.7" stroke-linecap="round"/>')
     parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_inner}" fill="#FFFDF3" stroke="#B8842E" stroke-width="2"/>')
     petal_r_mid = R_inner * 0.6
     petal_r = R_inner * 0.24
