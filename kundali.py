@@ -3000,23 +3000,22 @@ if is_premium(user_id):
     with tab_transit:
         st.markdown(f'<p class="kmuted" style="margin-bottom:10px;">As of {transit_label} '
                      f'({form["city"][0]})</p>', unsafe_allow_html=True)
-        t_header = "<tr><th>Graha</th><th>Current Position</th><th>Transiting House</th><th>Nakṣatra</th></tr>"
+        t_header = "<tr><th>Graha</th><th>Degree</th><th>Zodiac Sign</th><th>Nakṣatra</th></tr>"
         t_rows = []
         for b in core_transit_bodies:
             if b["key"] == "As":
                 continue
-            house_num = ((b["sign"] - b_asc["sign"]) % 12) + 1
             retro = " ℞" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
             t_rows.append(
                 f'<tr><td class="body-key">{b["key"]}</td>'
-                f'<td>{SIGNS[b["sign"]]} {fmt_deg(b["inSign"])}{retro}</td>'
-                f'<td>House {house_num}</td>'
+                f'<td>{fmt_deg(b["inSign"])}{retro}</td>'
+                f'<td>{SIGNS[b["sign"]]}</td>'
                 f'<td>{NAKSHATRAS[b["nakIdx"]]}</td></tr>'
             )
         st.markdown(
             f'<table class="gtable">{t_header}{"".join(t_rows)}</table>'
             f'<p class="kmuted" style="font-size:12px;margin-top:8px;">'
-            "House numbers are relative to your birth lagna. ℞ = retrograde.</p>",
+            "℞ = retrograde.</p>",
             unsafe_allow_html=True,
         )
 
