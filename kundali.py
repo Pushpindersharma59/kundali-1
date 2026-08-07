@@ -2178,7 +2178,7 @@ def draw_diamond_chart_pdf(pdf, bodies, asc_sign: int, asc_body: dict, x0: float
             ty += 4.2
 
 
-def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
+def generate_kundali_pdf_bytes(birth_chart, form, transit_chart=None) -> bytes:
     GOLD, IVORY, SINDOOR, MUTED = (184, 132, 46), (58, 46, 31), (196, 70, 43), (122, 111, 92)
     LINE, PANEL_SOFT, WHITE = (222, 196, 120), (255, 243, 176), (255, 253, 231)
 
@@ -2416,10 +2416,20 @@ def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
 
     section("Grahas by Trikona Group (ascending by degree)")
     trikona_planets = planets_by_trikona_group(core_bodies, b_asc["sign"])
-    for group_name, entries in trikona_planets.items():
+    transit_core_bodies = (
+        [b for b in transit_chart["bodies"] if b["key"] in CORE_KEYS] if transit_chart else []
+    )
+    trikona_transit = (
+        planets_by_trikona_group(transit_core_bodies, b_asc["sign"]) if transit_core_bodies else {}
+    )
+    for group_name in trikona_planets:
+        entries = trikona_planets[group_name]
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(*GOLD)
         pdf.cell(0, 6.5, group_name, ln=True)
+        pdf.set_font("Helvetica", "B", 8.5)
+        pdf.set_text_color(*MUTED)
+        pdf.cell(0, 4.5, "Birth", ln=True)
         pdf.set_font("Helvetica", "", 9.5)
         pdf.set_text_color(*IVORY)
         if entries:
@@ -2430,6 +2440,21 @@ def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
         else:
             line = "No grahas placed in this group's houses."
         pdf.multi_cell(0, 5, line)
+        if trikona_transit:
+            t_entries = trikona_transit.get(group_name, [])
+            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.set_text_color(*SINDOOR)
+            pdf.cell(0, 4.5, "Current Transit", ln=True)
+            pdf.set_font("Helvetica", "", 9.5)
+            pdf.set_text_color(*IVORY)
+            if t_entries:
+                t_line = ", ".join(
+                    f'{_ascii_key(b["key"])} {int(b["inSign"])}\u00b0 ({SIGNS_ASCII[b["sign"]]})'
+                    for b in t_entries
+                )
+            else:
+                t_line = "No grahas currently transiting this group's houses."
+            pdf.multi_cell(0, 5, t_line)
         pdf.ln(2)
 
     section("Muhurta - Auspicious & Inauspicious Timings (birth date)")
@@ -2456,7 +2481,7 @@ def generate_kundali_pdf_bytes(birth_chart, form) -> bytes:
     return out.encode("latin-1") if isinstance(out, str) else bytes(out)
 
 
-def generate_kundali_html_report(birth_chart, form) -> str:
+def generate_kundali_html_report(birth_chart, form, transit_chart=None) -> str:
     b_asc = next(b for b in birth_chart["bodies"] if b["key"] == "As")
     b_moon = next(b for b in birth_chart["bodies"] if b["key"] == "Mo")
     pan = birth_chart["panchanga"]
@@ -2513,6 +2538,12 @@ def generate_kundali_html_report(birth_chart, form) -> str:
     )
 
     _trikona_planets = planets_by_trikona_group(core_bodies, b_asc["sign"])
+    _transit_core_bodies = (
+        [b for b in transit_chart["bodies"] if b["key"] in CORE_KEYS] if transit_chart else []
+    )
+    _trikona_transit = (
+        planets_by_trikona_group(_transit_core_bodies, b_asc["sign"]) if _transit_core_bodies else {}
+    )
 
     def _trikona_cell(entries):
         if not entries:
@@ -2523,8 +2554,14 @@ def generate_kundali_html_report(birth_chart, form) -> str:
         return ", ".join(parts)
 
     trikona_group_rows = "".join(
-        f"<tr><td class='k' style='width:35%;'>{group_name}</td>"
-        f"<td>{_trikona_cell(entries)}</td></tr>"
+        f"<tr><td class='k' style='width:30%;'>{group_name}</td>"
+        f"<td><span style='font-size:11px;color:#7A6F5C;'>BIRTH</span><br>{_trikona_cell(entries)}"
+        + (
+            f"<br><span style='font-size:11px;color:#C4462B;'>CURRENT TRANSIT</span><br>"
+            f"{_trikona_cell(_trikona_transit.get(group_name, []))}"
+            if _trikona_transit else ""
+        )
+        + "</td></tr>"
         for group_name, entries in _trikona_planets.items()
     )
 
@@ -3118,7 +3155,7 @@ if is_premium(user_id):
         unsafe_allow_html=True,
     )
     if HAS_FPDF:
-        pdf_bytes = generate_kundali_pdf_bytes(birth_chart, form)
+        pdf_bytes = generate_kundali_pdf_bytes(birth_chart, form, transit_chart)
         st.download_button(
             "📄 Download Kundali PDF", data=pdf_bytes,
             file_name=f"kundali_{form['city'][0]}_{form['dob'].isoformat()}.pdf",
@@ -3127,7 +3164,7 @@ if is_premium(user_id):
     else:
         st.info("Install `fpdf2` (`pip install fpdf2`) to enable PDF export. "
                 "Meanwhile, here's an HTML report you can save or print to PDF from your browser.")
-        html_report = generate_kundali_html_report(birth_chart, form)
+        html_report = generate_kundali_html_report(birth_chart, form, transit_chart)
         st.download_button(
             "📄 Download Kundali Report (HTML)", data=html_report,
             file_name=f"kundali_{form['city'][0]}_{form['dob'].isoformat()}.html",
