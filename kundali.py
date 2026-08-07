@@ -1502,45 +1502,104 @@ def seed_premium_demo_account():
 seed_premium_demo_account()
 
 
+def _solid_sphere_svg(parts, defs, grad_id, cx, cy, r, base_hex, highlight_hex, label=""):
+    """Appends a 'solid' glossy sphere (radial-gradient shaded circle, like a
+    tiny 3D planet) plus an optional 2-letter label to parts/defs — pure
+    SVG/CSS, no external images, so it always renders identically everywhere."""
+    defs.append(
+        f'<radialGradient id="{grad_id}" cx="35%" cy="30%" r="75%">'
+        f'<stop offset="0%" stop-color="{highlight_hex}"/>'
+        f'<stop offset="55%" stop-color="{base_hex}"/>'
+        f'<stop offset="100%" stop-color="{base_hex}" stop-opacity="0.85"/>'
+        f'</radialGradient>'
+    )
+    parts.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{r}" fill="url(#{grad_id})" '
+                 f'stroke="rgba(0,0,0,0.15)" stroke-width="0.6"/>')
+    if label:
+        parts.append(f'<text x="{cx:.1f}" y="{cy:.1f}" text-anchor="middle" dominant-baseline="middle" '
+                      f'font-size="{r*0.85:.1f}" font-weight="700" fill="#ffffff" '
+                      f'font-family="Georgia, serif" opacity="0.95">{label}</text>')
+
+
+# (base, highlight) glossy-sphere colours per graha — same hues as
+# PLANET_TRANSIT_COLORS elsewhere in the app, for a consistent palette.
+_SPHERE_COLORS = {
+    "Su": ("#E67E22", "#FFD98A"), "Mo": ("#7EC8E3", "#F2FBFF"),
+    "Ma": ("#E74C3C", "#FFB3A8"), "Me": ("#2ECC71", "#D6FFE8"),
+    "Jp": ("#D4A017", "#FFF0B0"), "Ve": ("#C2185B", "#FFC4DE"),
+    "Sa": ("#8B5E3C", "#E8CBA8"),
+}
+
+
 def build_zodiac_hero_svg(size: int = 460) -> str:
-    """Purely decorative zodiac wheel for the login page hero — not tied to any
-    chart data, just branding. The zodiac glyphs are standard Unicode
-    astrological symbols, each suffixed with U+FE0E (the 'text presentation'
-    variation selector) — without it, some browsers/OS combinations render
-    these as colourful emoji icons with a background box instead of plain
-    gold text. The center uses a hand-drawn lotus mandala over radiating
-    sunburst rays rather than the Devanagari Om character, since that glyph
-    isn't reliably available in every browser/OS font stack."""
-    pad = size * 0.06
+    """Decorative zodiac wheel for the login page hero — not tied to any chart
+    data, just branding. Zodiac glyphs use the Unicode text-presentation
+    variation selector (U+FE0E) to avoid rendering as colourful emoji boxes.
+    The center shows the actual Devanagari Om (ॐ) with a broad font-family
+    fallback list, framed by a lotus-petal ring and sunburst rays. A ring of
+    'solid' glossy planet spheres (pure SVG radial gradients — no external
+    images) orbits just outside the wheel on a thin dashed path, plus small
+    Kundli (diamond-chart) and Nakshatra (star) glyphs for extra flavour."""
+    pad = size * 0.22
     vb = size + pad * 2
     cx = cy = vb / 2
     R_outer = size * 0.44
     R_mid = size * 0.34
     R_inner = size * 0.14
-    VS = "\ufe0e"  # text-presentation variation selector
+    R_orbit = size * 0.56
+    VS = "\ufe0e"
     zodiac = [c + VS for c in
               ["\u2648", "\u2649", "\u264a", "\u264b", "\u264c", "\u264d",
                "\u264e", "\u264f", "\u2650", "\u2651", "\u2652", "\u2653"]]
     names = ["ARIES", "TAURUS", "GEMINI", "CANCER", "LEO", "VIRGO", "LIBRA",
               "SCORPIO", "SAGITTARIUS", "CAPRICORN", "AQUARIUS", "PISCES"]
+    OM_FONTS = ("'Noto Sans Devanagari','Nirmala UI','Kohinoor Devanagari',"
+                "'Devanagari Sangam MN','Mangal',sans-serif")
 
     def pt(r, deg):
         rad = math.radians(deg - 90)
         return cx + r * math.cos(rad), cy + r * math.sin(rad)
 
-    parts = [
-        f'<svg viewBox="0 0 {vb} {vb}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">',
-        '<defs><radialGradient id="zodiacGlow" cx="50%" cy="50%" r="60%">'
+    defs = [
+        '<radialGradient id="zodiacGlow" cx="50%" cy="50%" r="60%">'
         '<stop offset="0%" stop-color="#FFFDF3"/><stop offset="100%" stop-color="#FFF0AE"/>'
-        '</radialGradient>'
+        '</radialGradient>',
         '<radialGradient id="sunGlow" cx="50%" cy="50%" r="50%">'
         '<stop offset="0%" stop-color="#FFF6D8" stop-opacity="0.95"/>'
         '<stop offset="70%" stop-color="#FFE9A8" stop-opacity="0.35"/>'
         '<stop offset="100%" stop-color="#FFE9A8" stop-opacity="0"/>'
-        '</radialGradient></defs>',
-        f'<circle cx="{cx}" cy="{cy}" r="{R_outer}" fill="url(#zodiacGlow)" stroke="#B8842E" stroke-width="2.5"/>',
-        f'<circle cx="{cx}" cy="{cy}" r="{R_mid}" fill="none" stroke="#B8842E" stroke-width="1" opacity="0.55"/>',
+        '</radialGradient>',
     ]
+    parts = [f'<svg viewBox="0 0 {vb} {vb}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">']
+
+    # ---- outer orbit path (dashed) + solid planet spheres riding on it ----
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_orbit}" fill="none" stroke="#B8842E" '
+                 f'stroke-width="1" stroke-dasharray="3,6" opacity="0.45"/>')
+    orbit_keys = ["Su", "Mo", "Ma", "Me", "Jp", "Ve", "Sa"]
+    for i, key in enumerate(orbit_keys):
+        ang = i * (360 / len(orbit_keys))
+        px, py = pt(R_orbit, ang)
+        base_hex, hi_hex = _SPHERE_COLORS[key]
+        _solid_sphere_svg(parts, defs, f"sph_{key}", px, py, size * 0.032, base_hex, hi_hex, label=key)
+
+    # ---- Kundli (diamond-chart) and Nakshatra (star) decorative glyphs, at
+    # the top and bottom of the orbit ring ----
+    kx, ky = pt(R_orbit, 0)
+    k_r = size * 0.026
+    parts.append(f'<rect x="{kx-k_r:.1f}" y="{ky-k_r-size*0.09:.1f}" width="{k_r*2:.1f}" height="{k_r*2:.1f}" '
+                 f'fill="#FFFDF3" stroke="#B8842E" stroke-width="1.4" '
+                 f'transform="rotate(45 {kx:.1f} {ky-k_r-size*0.09:.1f})"/>')
+    nx2, ny2 = pt(R_orbit, 180)
+    star_pts = []
+    for i in range(10):
+        sang = math.radians(i * 36 - 90)
+        srad = size * (0.028 if i % 2 == 0 else 0.012)
+        star_pts.append(f"{nx2 + srad*math.cos(sang):.1f},{ny2 + size*0.09 + srad*math.sin(sang):.1f}")
+    parts.append(f'<polygon points="{" ".join(star_pts)}" fill="#B8842E" opacity="0.85"/>')
+
+    # ---- main wheel ----
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_outer}" fill="url(#zodiacGlow)" stroke="#B8842E" stroke-width="2.5"/>')
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_mid}" fill="none" stroke="#B8842E" stroke-width="1" opacity="0.55"/>')
     for i in range(12):
         boundary = i * 30
         x1, y1 = pt(R_mid, boundary)
@@ -1561,6 +1620,7 @@ def build_zodiac_hero_svg(size: int = 460) -> str:
         parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#B8842E" '
                       f'stroke-width="0.7" opacity="0.4"/>')
 
+    # ---- center: sunburst + lotus frame + real Om glyph ----
     glow_r = R_inner * 2.3
     parts.append(f'<circle cx="{cx}" cy="{cy}" r="{glow_r}" fill="url(#sunGlow)"/>')
     n_rays = 32
@@ -1573,20 +1633,23 @@ def build_zodiac_hero_svg(size: int = 460) -> str:
         parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
                       f'stroke="#D8A845" stroke-width="1.5" opacity="0.7" stroke-linecap="round"/>')
     parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_inner}" fill="#FFFDF3" stroke="#B8842E" stroke-width="2"/>')
-    petal_r_mid = R_inner * 0.6
-    petal_r = R_inner * 0.24
+    petal_r_mid = R_inner * 0.85
+    petal_r = R_inner * 0.2
     for i in range(8):
         ang = math.radians(i * 45)
-        px = cx + petal_r_mid * 0.55 * math.sin(ang)
-        py = cy - petal_r_mid * 0.55 * math.cos(ang)
+        px2 = cx + petal_r_mid * 0.6 * math.sin(ang)
+        py2 = cy - petal_r_mid * 0.6 * math.cos(ang)
         parts.append(
-            f'<ellipse cx="{px:.1f}" cy="{py:.1f}" rx="{petal_r:.1f}" ry="{petal_r*1.6:.1f}" '
-            f'transform="rotate({i*45} {px:.1f} {py:.1f})" fill="none" stroke="#B8842E" stroke-width="2.5"/>'
+            f'<ellipse cx="{px2:.1f}" cy="{py2:.1f}" rx="{petal_r:.1f}" ry="{petal_r*1.5:.1f}" '
+            f'transform="rotate({i*45} {px2:.1f} {py2:.1f})" fill="none" stroke="#B8842E" '
+            f'stroke-width="1.2" opacity="0.55"/>'
         )
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_inner*0.62}" fill="none" stroke="#B8842E" stroke-width="1.5"/>')
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_inner*0.14}" fill="#B8842E"/>')
-    parts.append("</svg>")
-    return "".join(parts)
+    parts.append(f'<text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="central" '
+                 f'font-size="{R_inner*1.15:.1f}" fill="#B8842E" font-family="{OM_FONTS}">\u0950</text>')
+
+    svg_open = parts[0]
+    body = "".join(parts[1:])
+    return svg_open + "<defs>" + "".join(defs) + "</defs>" + body + "</svg>"
 
 
 def build_compass_star_svg(size: int = 90) -> str:
