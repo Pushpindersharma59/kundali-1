@@ -1465,153 +1465,59 @@ FEATURE_STRIP = [
 def render_auth_screen():
     """Full-page login / signup flow. Returns nothing — sets
     st.session_state['user'] and reruns once authenticated."""
-    NAVY = "#1B3A6B"
-    # NASA public-domain image (science.nasa.gov gallery) — free to use, no licensing risk.
-    SATURN_URL = ("https://assets.science.nasa.gov/content/dam/science/psd/solar/internal_resources/"
-                  "730/Saturn_and_its_rings.jpeg/jcr:content/renditions/cq5dam.web.1280.1280.jpeg")
-
     st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            background:
-                radial-gradient(circle at 8% 8%, rgba(255,221,150,0.85) 0%, rgba(255,221,150,0) 32%),
-                radial-gradient(1.6px 1.6px at 18% 14%, #ffffff 100%, transparent),
-                radial-gradient(1.6px 1.6px at 62% 7%, #ffffff 100%, transparent),
-                radial-gradient(1.6px 1.6px at 80% 18%, #ffffff 100%, transparent),
-                radial-gradient(1.6px 1.6px at 40% 22%, #ffffff 100%, transparent),
-                radial-gradient(1.6px 1.6px at 90% 10%, #ffffff 100%, transparent),
-                radial-gradient(1.6px 1.6px at 70% 28%, #ffffff 100%, transparent),
-                radial-gradient(1.6px 1.6px at 30% 5%, #ffffff 100%, transparent),
-                linear-gradient(180deg, #eaf3fb 0%, #f8f1de 55%, #f5e8c3 100%) !important;
-            background-attachment: fixed;
-        }}
-        .hero-tagline {{ letter-spacing: 0.32em; font-size: 13px; color: {NAVY};
-            text-align: center; margin: 6px 0 0; font-weight: 600; opacity: 0.8; }}
-        .hero-brand {{ text-align: center; color: {NAVY}; font-family: Georgia, serif;
-            font-size: 46px; letter-spacing: 0.05em; margin: 6px 0 0; font-weight: 700; }}
-        .hero-divider {{ width: 70px; height: 2px; background: {C['gold']}; margin: 16px auto 18px; opacity: 0.7; }}
-        .hero-headline {{ color: {NAVY}; font-family: Georgia, serif; font-size: 27px;
-            font-weight: 700; text-align: center; margin: 0 0 10px; }}
-        .hero-desc {{ color: {C['muted']}; text-align: center; font-size: 15px; line-height: 1.5;
-            max-width: 420px; margin: 0 auto 22px; }}
-        .welcome-back {{ color: {C['gold']}; letter-spacing: 0.18em; font-size: 13px; font-weight: 700;
-            text-align: center; margin: 4px 0 12px; }}
-        div[data-testid="stTabs"] {{
-            background: rgba(255,255,255,0.88); border: 1px solid {C['line']}; border-radius: 16px;
-            padding: 8px 26px 22px; box-shadow: 0 8px 26px rgba(27,58,107,0.14); max-width: 440px;
-            margin: 0 auto;
-        }}
-        div[data-testid="stTabs"] button[role="tab"] {{ font-weight: 700; letter-spacing: 0.04em; color: {NAVY}; }}
-        div[data-testid="stTabs"] .stButton button {{
-            background: {NAVY} !important; color: #fff !important; border: none !important;
-            font-weight: 700; letter-spacing: 0.05em;
-        }}
-        .feature-strip {{
-            background: rgba(255,255,255,0.92); border: 1px solid {C['line']}; border-radius: 18px;
-            padding: 26px 20px 10px; margin-top: 36px; box-shadow: 0 4px 16px rgba(27,58,107,0.08);
-        }}
-        .feature-item {{ text-align: center; padding-bottom: 22px; }}
-        .feature-icon {{ font-size: 30px; margin-bottom: 8px; }}
-        .feature-title {{ color: {NAVY}; font-weight: 700; font-size: 14px; letter-spacing: 0.03em;
-            text-transform: uppercase; margin-bottom: 4px; }}
-        .feature-desc {{ color: {C['muted']}; font-size: 12.5px; line-height: 1.4; }}
-        </style>
-        """,
+        f'<h1 style="color:{C["gold"]}; font-family:Georgia, serif; letter-spacing:0.06em;">Kuṇḍalī</h1>'
+        f'<p class="kmuted" style="margin-top:-10px; font-size:16px;">Sign in to save your birth details '
+        f'and come back to them anytime.</p>',
         unsafe_allow_html=True,
     )
 
-    hero_l, hero_r = st.columns([1.05, 1])
+    tab_login, tab_signup = st.tabs(["Log in", "Sign up"])
 
-    with hero_l:
-        st.markdown(
-            f'<div style="max-width:84px;margin:0 auto;">{build_compass_star_svg(84)}</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown('<p class="hero-brand">Kuṇḍalī</p>', unsafe_allow_html=True)
-        st.markdown('<p class="hero-tagline">DISCOVER &middot; REFLECT &middot; GROW</p>', unsafe_allow_html=True)
-        st.markdown('<div class="hero-divider"></div>', unsafe_allow_html=True)
-        st.markdown('<p class="hero-headline">Your Birth Chart Awaits</p>', unsafe_allow_html=True)
-        st.markdown(
-            '<p class="hero-desc">Explore Vedic astrology, nakṣatras, divisional charts, live '
-            'planetary transits, and more — every calculation powered by real astronomy.</p>',
-            unsafe_allow_html=True,
-        )
-        st.markdown('<p class="welcome-back">WELCOME BACK</p>', unsafe_allow_html=True)
-
-        tab_login, tab_signup = st.tabs(["SIGN IN", "NEW SIGN UP"])
-
-        with tab_login:
-            identifier = st.text_input("Username", key="login_identifier", placeholder="User Name")
-            password = st.text_input("Password", type="password", key="login_password", placeholder="Password")
-            if st.button("Sign In", use_container_width=True, key="signin_btn"):
-                if not identifier or not password:
-                    st.error("Enter your username and password.")
+    with tab_login:
+        st.markdown('<div class="kcard" style="max-width:440px;">', unsafe_allow_html=True)
+        identifier = st.text_input("Username", key="login_identifier")
+        password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Log in", use_container_width=True):
+            if not identifier or not password:
+                st.error("Enter your username and password.")
+            else:
+                user, msg = authenticate(identifier.strip(), password)
+                if user:
+                    st.session_state["user"] = {"id": user["id"], "username": user["username"]}
+                    st.rerun()
                 else:
-                    user, msg = authenticate(identifier.strip(), password)
-                    if user:
-                        st.session_state["user"] = {"id": user["id"], "username": user["username"]}
-                        st.rerun()
-                    else:
-                        st.error(msg)
+                    st.error(msg)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        with tab_signup:
-            su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
-            su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
-            su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
-            su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
-            if st.button("Create account", use_container_width=True, key="signup_btn"):
-                errors = []
-                if not USERNAME_RE.match(su_username or ""):
-                    errors.append("Username must be 3-20 characters: letters, numbers, underscore only.")
-                elif username_taken(su_username):
-                    errors.append("That username is already taken — pick another one.")
-                if len(su_pw or "") < 8:
-                    errors.append("Password must be at least 8 characters.")
-                if su_pw != su_pw2:
-                    errors.append("Passwords don't match.")
-                if not su_terms:
-                    errors.append("You must agree to the Terms of Service and Privacy Policy.")
-                if errors:
-                    for e in errors:
-                        st.error(e)
+    with tab_signup:
+        st.markdown('<div class="kcard" style="max-width:440px;">', unsafe_allow_html=True)
+        su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
+        su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
+        su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
+        su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
+        if st.button("Create account", use_container_width=True):
+            errors = []
+            if not USERNAME_RE.match(su_username or ""):
+                errors.append("Username must be 3-20 characters: letters, numbers, underscore only.")
+            elif username_taken(su_username):
+                errors.append("That username is already taken — pick another one.")
+            if len(su_pw or "") < 8:
+                errors.append("Password must be at least 8 characters.")
+            if su_pw != su_pw2:
+                errors.append("Passwords don't match.")
+            if not su_terms:
+                errors.append("You must agree to the Terms of Service and Privacy Policy.")
+            if errors:
+                for e in errors:
+                    st.error(e)
+            else:
+                ok, msg = create_user(su_username.strip(), su_pw)
+                if not ok:
+                    st.error(msg)
                 else:
-                    ok, msg = create_user(su_username.strip(), su_pw)
-                    if not ok:
-                        st.error(msg)
-                    else:
-                        st.success("Account created — you can sign in now.")
-
-    with hero_r:
-        wheel_svg = build_zodiac_hero_svg(440)
-        st.markdown(
-            f"""
-            <div style="position:relative; max-width:520px; margin:0 auto;">
-                {wheel_svg}
-                <img src="{SATURN_URL}" alt="Saturn"
-                     style="position:absolute; top:2%; right:4%; width:15%; aspect-ratio:1/1;
-                            object-fit:cover; border-radius:50%; border:3px solid {NAVY};
-                            box-shadow:0 8px 20px rgba(27,58,107,0.3);" />
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f'<p style="text-align:center; font-size:11px; color:{C["muted"]}; margin-top:6px;">'
-            'Saturn — courtesy NASA/JPL-Caltech (public domain)</p>',
-            unsafe_allow_html=True,
-        )
-
-    feature_html = ['<div class="feature-strip"><div style="display:grid;'
-                     'grid-template-columns:repeat(4,1fr);gap:6px;">']
-    for icon, title, desc in FEATURE_STRIP:
-        feature_html.append(
-            f'<div class="feature-item"><div class="feature-icon">{icon}</div>'
-            f'<div class="feature-title">{title}</div>'
-            f'<div class="feature-desc">{desc}</div></div>'
-        )
-    feature_html.append("</div></div>")
-    st.markdown("".join(feature_html), unsafe_allow_html=True)
+                    st.success("Account created — you can log in now.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ============================================================
@@ -3452,8 +3358,8 @@ with c6:
 st.markdown('<div class="kcard"><h4>Graha Info</h4>', unsafe_allow_html=True)
 
 header = (
-    '<tr><th class="uh">Body</th><th class="uh">Kāraka</th><th>Long</th><th>Lat</th>'
-    '<th>Dec</th><th class="uh">Nakṣatra</th><th>Pada</th></tr>'
+    '<tr><th class="uh">Body</th><th class="uh">Kāraka</th><th>Long</th>'
+    '<th class="uh">Nakṣatra</th><th>Pada</th></tr>'
 )
 body_rows = []
 for b in birth_chart["bodies"]:
@@ -3469,8 +3375,6 @@ for b in birth_chart["bodies"]:
         f'{top_karaka_mark}{b["name"]}{retro_mark}{combust_mark}</td>'
         f'<td class="kmuted">{b["karaka"] or ""}</td>'
         f'<td style="font-family:monospace;">{long_str}</td>'
-        f'<td class="kmuted" style="font-family:monospace;">{fmt_dms(b["lat"])}</td>'
-        f'<td class="kmuted" style="font-family:monospace;">{fmt_dms(b["dec"])}</td>'
         f'<td>{nak_str}</td>'
         f'<td>{b["pada"]}</td></tr>'
     )
