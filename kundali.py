@@ -2037,6 +2037,30 @@ def planets_by_trikona_group(bodies: list, asc_sign: int) -> dict:
     return result
 
 
+def merge_trikona_entries(birth_entries: list, transit_entries: list) -> list:
+    """Interleaves a group's birth and transit grahas into one list, sorted
+    ascending by degree, each item tagged so the caller can colour transit
+    entries differently instead of listing them in a separate block below."""
+    merged = [dict(b, is_transit=False) for b in birth_entries]
+    merged += [dict(b, is_transit=True) for b in transit_entries]
+    merged.sort(key=lambda b: b["inSign"])
+    return merged
+
+
+def bodies_in_trikona_group(bodies: list, asc_sign: int, group_name: str) -> list:
+    """Same house-membership test as planets_by_trikona_group, but for a single
+    named group only — used to build the per-element mini-charts."""
+    houses = TRIKONA_GROUP_HOUSES[group_name]
+    out = []
+    for b in bodies:
+        if b["key"] == "As":
+            continue
+        house_num = ((b["sign"] - asc_sign) % 12) + 1
+        if house_num in houses:
+            out.append(b)
+    return out
+
+
 # ---- Simple Muhurta helpers: sunrise/sunset -> Rahu Kalam, Yamaganda, Gulika
 # Kalam (inauspicious periods to avoid for new beginnings) and Abhijit Muhurta
 # (the auspicious window straddling local solar noon). These are the classical
@@ -2424,38 +2448,34 @@ def generate_kundali_pdf_bytes(birth_chart, form, transit_chart=None) -> bytes:
     )
     for group_name in trikona_planets:
         entries = trikona_planets[group_name]
+        t_entries = trikona_transit.get(group_name, [])
+        merged = merge_trikona_entries(entries, t_entries)
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(*GOLD)
         pdf.cell(0, 6.5, group_name, ln=True)
-        pdf.set_font("Helvetica", "B", 8.5)
-        pdf.set_text_color(*MUTED)
-        pdf.cell(0, 4.5, "Birth", ln=True)
         pdf.set_font("Helvetica", "", 9.5)
-        pdf.set_text_color(*IVORY)
-        if entries:
-            line = ", ".join(
-                f'{_ascii_key(b["key"])} {int(b["inSign"])}\u00b0 ({SIGNS_ASCII[b["sign"]]})'
-                for b in entries
-            )
+        if merged:
+            for i, b in enumerate(merged):
+                pdf.set_text_color(*(SINDOOR if b["is_transit"] else IVORY))
+                text = f'{_ascii_key(b["key"])} {int(b["inSign"])}\u00b0 ({SIGNS_ASCII[b["sign"]]})'
+                if i < len(merged) - 1:
+                    text += ", "
+                pdf.write(5, text)
+            pdf.ln(7)
         else:
-            line = "No grahas placed in this group's houses."
-        pdf.multi_cell(0, 5, line)
-        if trikona_transit:
-            t_entries = trikona_transit.get(group_name, [])
-            pdf.set_font("Helvetica", "B", 8.5)
-            pdf.set_text_color(*SINDOOR)
-            pdf.cell(0, 4.5, "Current Transit", ln=True)
-            pdf.set_font("Helvetica", "", 9.5)
-            pdf.set_text_color(*IVORY)
-            if t_entries:
-                t_line = ", ".join(
-                    f'{_ascii_key(b["key"])} {int(b["inSign"])}\u00b0 ({SIGNS_ASCII[b["sign"]]})'
-                    for b in t_entries
-                )
-            else:
-                t_line = "No grahas currently transiting this group's houses."
-            pdf.multi_cell(0, 5, t_line)
+            pdf.set_text_color(*MUTED)
+            pdf.multi_cell(0, 5, "No grahas placed in this group's houses.")
         pdf.ln(2)
+    pdf.set_font("Helvetica", "I", 7.5)
+    pdf.set_text_color(*IVORY)
+    pdf.write(4, "Black")
+    pdf.set_text_color(*MUTED)
+    pdf.write(4, " = birth position   ")
+    pdf.set_text_color(*SINDOOR)
+    pdf.write(4, "Red")
+    pdf.set_text_color(*MUTED)
+    pdf.write(4, " = current transit position")
+    pdf.ln(8)
 
     section("Muhurta - Auspicious & Inauspicious Timings (birth date)")
     lat_, lon_, tz_ = form["city"][2], form["city"][3], form["city"][4]
@@ -2476,6 +2496,34 @@ def generate_kundali_pdf_bytes(birth_chart, form, transit_chart=None) -> bytes:
         "sunset; no equation-of-time correction) - not a substitute for a full electional "
         "(muhurta) analysis for a specific event, which also weighs tithi, nakshatra, "
         "lagna, and relevant doshas.")
+
+    # ---------------- Page 6: Trikona Group mini-charts (Fire/Earth/Air/Water) ----------------
+    pdf.add_page()
+    banner("TRIKONA CHARTS", "One Diamond Chart per Element - Fire, Earth, Air, Water")
+    mini_size = 82
+    gap_x, gap_y = 14, 20
+    x0_col = [18, 18 + mini_size + gap_x]
+    y0_row = [38, 38 + mini_size + gap_y]
+    positions = [
+        ("Dharma Trikona (Fire)", x0_col[0], y0_row[0]),
+        ("Artha Trikona (Earth)", x0_col[1], y0_row[0]),
+        ("Kama Trikona (Air)", x0_col[0], y0_row[1]),
+        ("Moksha Trikona (Water)", x0_col[1], y0_row[1]),
+    ]
+    for group_name, gx, gy in positions:
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*GOLD)
+        pdf.set_xy(gx, gy - 7)
+        pdf.cell(mini_size, 6, group_name, align="C")
+        group_bodies = bodies_in_trikona_group(core_bodies, b_asc["sign"], group_name)
+        draw_diamond_chart_pdf(pdf, group_bodies, b_asc["sign"], b_asc, gx, gy, mini_size)
+    pdf.set_y(y0_row[1] + mini_size + 12)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(*MUTED)
+    pdf.multi_cell(0, 4.5,
+        "Each chart shows the birth lagna with only the grahas placed in that element's "
+        "three houses (Fire = 1,5,9; Earth = 2,6,10; Air = 3,7,11; Water = 4,8,12) - the "
+        "rest of the houses are left empty so that element's placements stand out clearly.")
 
     out = pdf.output(dest="S")
     return out.encode("latin-1") if isinstance(out, str) else bytes(out)
@@ -2545,25 +2593,35 @@ def generate_kundali_html_report(birth_chart, form, transit_chart=None) -> str:
         planets_by_trikona_group(_transit_core_bodies, b_asc["sign"]) if _transit_core_bodies else {}
     )
 
-    def _trikona_cell(entries):
-        if not entries:
+    def _trikona_merged_cell(birth_entries, transit_entries):
+        merged = merge_trikona_entries(birth_entries, transit_entries)
+        if not merged:
             return "—"
         parts = []
-        for b in entries:
-            parts.append(f'{b["key"]} {int(b["inSign"])}\u00b0 ({SIGNS[b["sign"]]})')
+        for b in merged:
+            color = "#C4462B" if b["is_transit"] else "#3A2E1F"
+            parts.append(f'<span style="color:{color};">{b["key"]} {int(b["inSign"])}\u00b0 ({SIGNS[b["sign"]]})</span>')
         return ", ".join(parts)
 
     trikona_group_rows = "".join(
         f"<tr><td class='k' style='width:30%;'>{group_name}</td>"
-        f"<td><span style='font-size:11px;color:#7A6F5C;'>BIRTH</span><br>{_trikona_cell(entries)}"
-        + (
-            f"<br><span style='font-size:11px;color:#C4462B;'>CURRENT TRANSIT</span><br>"
-            f"{_trikona_cell(_trikona_transit.get(group_name, []))}"
-            if _trikona_transit else ""
-        )
-        + "</td></tr>"
+        f"<td>{_trikona_merged_cell(entries, _trikona_transit.get(group_name, []))}</td></tr>"
         for group_name, entries in _trikona_planets.items()
     )
+
+    # ---- Four mini diamond charts, one per Trikona element, each showing only
+    # that group's grahas (rest of the houses left empty) ----
+    trikona_mini_charts_html = ""
+    for group_name in TRIKONA_GROUP_HOUSES:
+        group_bodies = bodies_in_trikona_group(core_bodies, b_asc["sign"], group_name)
+        mini_svg = build_svg_chart(group_bodies, [], b_asc["sign"], show_nakshatra=False)
+        mini_svg = mini_svg.replace('width="720" height="720"', 'width="340" height="340"')
+        trikona_mini_charts_html += (
+            f'<div style="text-align:center;">'
+            f'<p style="color:#B8842E;font-weight:700;margin-bottom:6px;">{group_name}</p>'
+            f'{mini_svg}'
+            f'</div>'
+        )
 
     _lat, _lon, _tz = form["city"][2], form["city"][3], form["city"][4]
     _mw = compute_muhurta_windows(form["dob"].year, form["dob"].month, form["dob"].day, _lat, _lon, _tz)
@@ -2667,6 +2725,17 @@ def generate_kundali_html_report(birth_chart, form, transit_chart=None) -> str:
     <tr><th>Trikoṇa Group</th><th>Grahas</th></tr>
     {trikona_group_rows}
   </table>
+  <p class="footer" style="text-align:left;margin-top:6px;">
+  <span style="color:#3A2E1F;font-weight:700;">Black</span> = birth position &nbsp;&middot;&nbsp;
+  <span style="color:#C4462B;font-weight:700;">Red</span> = current transit position</p>
+
+  <h2>Trikoṇa Charts &middot; Fire, Earth, Air, Water</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px;">
+    {trikona_mini_charts_html}
+  </div>
+  <p class="footer" style="text-align:left;margin-top:10px;">Each chart shows the birth lagna with only the
+  grahas placed in that element's three houses (Fire = 1,5,9; Earth = 2,6,10; Air = 3,7,11; Water = 4,8,12) —
+  the rest of the houses are left empty so that element's placements stand out clearly.</p>
 
   <h2>Muhūrta · Timings on the Birth Date</h2>
   <table>
