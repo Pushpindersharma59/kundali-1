@@ -373,6 +373,18 @@ NAK_ABBR = ["Aśw", "Bha", "Krt", "Roh", "Mrg", "Ard", "Pun", "Pus", "Āśl", "M
 
 COMBUSTION_ORB = {"Ma": 17, "Me": 14, "Jp": 11, "Ve": 10, "Sa": 15}
 
+# ---- Chara Kāraka significations (what each of the 8 ranked positions means) ----
+KARAKA_MEANINGS = {
+    "AK": "Ātmakāraka — self, soul purpose",
+    "AmK": "Amātyakāraka — career, counsel",
+    "BK": "Bhrātṛkāraka — siblings, courage",
+    "MK": "Mātṛkāraka — mother, home",
+    "PiK": "Pitṛkāraka — father, ancestors",
+    "PK": "Putrakāraka — children, intellect",
+    "GK": "Jñātikāraka — relatives, obstacles",
+    "DK": "Dārakāraka — spouse, partnerships",
+}
+
 # the 10 bodies plotted on the diamond/circular charts (special lagnas are table-only)
 CORE_KEYS = ["As", "Su", "Mo", "Ma", "Me", "Jp", "Ve", "Sa", "Ra", "Ke"]
 
@@ -3358,7 +3370,7 @@ with c6:
 st.markdown('<div class="kcard"><h4>Graha Info</h4>', unsafe_allow_html=True)
 
 header = (
-    '<tr><th class="uh">Body</th><th class="uh">Kāraka</th><th>Long</th>'
+    '<tr><th class="uh">Body</th><th class="uh">Kāraka</th><th>Kāraka Meaning</th>'
     '<th class="uh">Nakṣatra</th><th>Pada</th></tr>'
 )
 body_rows = []
@@ -3367,14 +3379,14 @@ for b in birth_chart["bodies"]:
     combust_mark = " 🔥" if b.get("combust") else ""
     # the two senior Chara Kārakas (Ātmakāraka, Amātyakāraka) get the ↑ marker
     top_karaka_mark = '<span class="kmuted" style="font-size:11px;">↑</span> ' if b.get("karaka") in ("AK", "AmK") else ""
-    long_str = f'{SIGN_ABBR[b["sign"]]} {fmt_dms(b["inSign"])}'
+    karaka_meaning = KARAKA_MEANINGS.get(b.get("karaka"), "—")
     nak_lord = DASHA_LORD_SHORT[b["nakIdx"] % 9]
     nak_str = f'{NAKSHATRAS[b["nakIdx"]]}<span class="kmuted">({b["nakIdx"]+1})</span> <span class="lord">{nak_lord}</span>'
     body_rows.append(
         f'<tr><td><span class="body-key">{b["key"]}</span>&nbsp;'
         f'{top_karaka_mark}{b["name"]}{retro_mark}{combust_mark}</td>'
         f'<td class="kmuted">{b["karaka"] or ""}</td>'
-        f'<td style="font-family:monospace;">{long_str}</td>'
+        f'<td class="kmuted">{karaka_meaning}</td>'
         f'<td>{nak_str}</td>'
         f'<td>{b["pada"]}</td></tr>'
     )
