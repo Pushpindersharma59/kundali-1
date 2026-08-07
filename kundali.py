@@ -865,6 +865,80 @@ def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int, show_nakshatra:
     return "".join(parts)
 
 
+# ---- Per-graha transit colors (birth positions always stay black/ivory) ----
+PLANET_TRANSIT_COLORS = {
+    "Su": "#E67E22",  # orange
+    "Mo": "#7EC8E3",  # light blue
+    "Ma": "#E74C3C",  # red
+    "Me": "#2ECC71",  # green
+    "Jp": "#F1C40F",  # yellow
+    "Ve": "#C2185B",  # dark pink
+    "Sa": "#8B5E3C",  # brown
+    "Ra": "#8E44AD",  # purple
+    "Ke": "#8E44AD",  # purple (paired with Rahu — not individually specified)
+}
+
+
+def build_combined_diamond_svg(birth_bodies, transit_bodies, asc_sign: int) -> str:
+    """A single diamond chart with birth AND transit grahas merged into one
+    ascending-by-degree list per house. Birth stays black/ivory; each transit
+    graha gets its own fixed colour (PLANET_TRANSIT_COLORS) instead of one
+    uniform transit colour."""
+    by_house = [[] for _ in range(12)]
+    for x in birth_bodies:
+        by_house[(x["sign"] - asc_sign + 12) % 12].append(dict(x, _is_transit=False))
+    for x in transit_bodies:
+        if x["key"] == "As":
+            continue
+        by_house[(x["sign"] - asc_sign + 12) % 12].append(dict(x, _is_transit=True))
+    for entries in by_house:
+        entries.sort(key=lambda b: b["inSign"])
+
+    def label(x, cx, y):
+        is_t = x["_is_transit"]
+        fill = PLANET_TRANSIT_COLORS.get(x["key"], C["sindoor"]) if is_t else (
+            C["moon"] if x["key"] == "As" else C["ivory"]
+        )
+        sub_fill = fill if is_t else C["muted"]
+        retro_mark = "℞" if (x["retro"] and x["key"] not in ("Ra", "Ke")) else ""
+        deg = math.floor(x["inSign"])
+        return (
+            f'<text x="{cx}" y="{y}" text-anchor="middle" font-size="13" font-weight="700" '
+            f'fill="{fill}" font-family="Georgia, serif">{x["key"]}'
+            f'<tspan font-size="9.5" fill="{sub_fill}" font-family="monospace">'
+            f' {deg}°{retro_mark}</tspan></text>'
+        )
+
+    parts = [
+        '<svg viewBox="0 0 400 400" width="720" height="720" '
+        'xmlns="http://www.w3.org/2000/svg" style="display:block;">',
+        '<defs><radialGradient id="cbg2" cx="50%" cy="50%" r="70%">'
+        '<stop offset="0%" stop-color="#FFFDE7" /><stop offset="100%" stop-color="#FFF3B0" />'
+        '</radialGradient></defs>',
+        f'<rect x="2" y="2" width="396" height="396" fill="url(#cbg2)" stroke="{C["gold"]}" stroke-width="2" />',
+        f'<line x1="2" y1="2" x2="398" y2="398" stroke="{C["gold"]}" stroke-width="1" opacity="0.85" />',
+        f'<line x1="398" y1="2" x2="2" y2="398" stroke="{C["gold"]}" stroke-width="1" opacity="0.85" />',
+        f'<polygon points="200,2 398,200 200,398 2,200" fill="none" stroke="{C["gold"]}" '
+        f'stroke-width="1" opacity="0.85" />',
+    ]
+
+    step = 15
+    for h, (cx, cy) in enumerate(HOUSE_CENTERS):
+        sign_num = ((asc_sign + h) % 12) + 1
+        entries = by_house[h]
+        n = len(entries)
+        start_y = cy - ((n - 1) * step) / 2 + 4
+        parts.append(
+            f'<text x="{cx}" y="{start_y - step - 2}" text-anchor="middle" font-size="10" '
+            f'fill="{C["muted"]}" font-family="monospace">{sign_num}</text>'
+        )
+        for i, x in enumerate(entries):
+            parts.append(label(x, cx, start_y + i * step))
+
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 def _wheel_point(cx, cy, r, clockwise_deg):
     rad = clockwise_deg * D2R
     return cx + r * math.sin(rad), cy - r * math.cos(rad)
@@ -2202,6 +2276,71 @@ def draw_diamond_chart_pdf(pdf, bodies, asc_sign: int, asc_body: dict, x0: float
             ty += 4.2
 
 
+def _hex_rgb(h: str):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+PLANET_TRANSIT_COLORS_RGB = {k: _hex_rgb(v) for k, v in PLANET_TRANSIT_COLORS.items()}
+
+
+def draw_combined_diamond_chart_pdf(pdf, birth_bodies, transit_bodies, asc_sign: int,
+                                     asc_body: dict, x0: float, y0: float, size: float):
+    """Single diamond chart with birth AND transit grahas merged, ascending by
+    degree per house. Birth stays black; each transit graha gets its own fixed
+    colour (PLANET_TRANSIT_COLORS_RGB)."""
+    x1, y1 = x0 + size, y0 + size
+    midx, midy = x0 + size / 2, y0 + size / 2
+
+    pdf.set_draw_color(184, 132, 46)
+    pdf.set_line_width(0.5)
+    pdf.rect(x0, y0, size, size)
+    pdf.line(x0, y0, x1, y1)
+    pdf.line(x1, y0, x0, y1)
+    pdf.set_line_width(0.35)
+    pdf.line(midx, y0, x1, midy)
+    pdf.line(x1, midy, midx, y1)
+    pdf.line(midx, y1, x0, midy)
+    pdf.line(x0, midy, midx, y0)
+
+    by_house = [[] for _ in range(12)]
+    for b in birth_bodies:
+        if b["key"] == "As":
+            continue
+        by_house[(b["sign"] - asc_sign + 12) % 12].append(dict(b, _is_transit=False))
+    for b in transit_bodies:
+        if b["key"] == "As":
+            continue
+        by_house[(b["sign"] - asc_sign + 12) % 12].append(dict(b, _is_transit=True))
+    for entries in by_house:
+        entries.sort(key=lambda b: b["inSign"])
+
+    for h, (fx, fy) in enumerate(HOUSE_FRACS):
+        cx, cy = x0 + fx * size, y0 + fy * size
+        sign_num = ((asc_sign + h) % 12) + 1
+        lines = []
+        if h == 0:
+            lines.append(("As " + str(int(asc_body["inSign"])) + "\u00b0", (58, 46, 31)))
+        for b in by_house[h]:
+            deg = int(b["inSign"])
+            retro = "R" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
+            color = PLANET_TRANSIT_COLORS_RGB.get(b["key"], (196, 70, 43)) if b["_is_transit"] else (58, 46, 31)
+            lines.append((f'{_ascii_key(b["key"])} {deg}\u00b0{retro}', color))
+
+        block_h = len(lines) * 4.2
+        pdf.set_font("Helvetica", "", 7)
+        pdf.set_text_color(122, 111, 92)
+        pdf.text(cx - 3, cy - block_h / 2 - 3, str(sign_num))
+
+        ty = cy - block_h / 2
+        for line_text, color in lines:
+            pdf.set_font("Helvetica", "B", 7)
+            pdf.set_text_color(*color)
+            pdf.set_xy(cx - 20, ty)
+            pdf.cell(40, 4.2, line_text, align="C")
+            ty += 4.2
+
+
 def generate_kundali_pdf_bytes(birth_chart, form, transit_chart=None) -> bytes:
     GOLD, IVORY, SINDOOR, MUTED = (184, 132, 46), (58, 46, 31), (196, 70, 43), (122, 111, 92)
     LINE, PANEL_SOFT, WHITE = (222, 196, 120), (255, 243, 176), (255, 253, 231)
@@ -2456,7 +2595,7 @@ def generate_kundali_pdf_bytes(birth_chart, form, transit_chart=None) -> bytes:
         pdf.set_font("Helvetica", "", 9.5)
         if merged:
             for i, b in enumerate(merged):
-                pdf.set_text_color(*(SINDOOR if b["is_transit"] else IVORY))
+                pdf.set_text_color(*(PLANET_TRANSIT_COLORS_RGB.get(b["key"], SINDOOR) if b["is_transit"] else IVORY))
                 text = f'{_ascii_key(b["key"])} {int(b["inSign"])}\u00b0 ({SIGNS_ASCII[b["sign"]]})'
                 if i < len(merged) - 1:
                     text += ", "
@@ -2497,33 +2636,36 @@ def generate_kundali_pdf_bytes(birth_chart, form, transit_chart=None) -> bytes:
         "(muhurta) analysis for a specific event, which also weighs tithi, nakshatra, "
         "lagna, and relevant doshas.")
 
-    # ---------------- Page 6: Trikona Group mini-charts (Fire/Earth/Air/Water) ----------------
+    # ---------------- Page 6: Combined Trikona Chart (birth + transit, one chart) ----------------
     pdf.add_page()
-    banner("TRIKONA CHARTS", "One Diamond Chart per Element - Fire, Earth, Air, Water")
-    mini_size = 82
-    gap_x, gap_y = 14, 20
-    x0_col = [18, 18 + mini_size + gap_x]
-    y0_row = [38, 38 + mini_size + gap_y]
-    positions = [
-        ("Dharma Trikona (Fire)", x0_col[0], y0_row[0]),
-        ("Artha Trikona (Earth)", x0_col[1], y0_row[0]),
-        ("Kama Trikona (Air)", x0_col[0], y0_row[1]),
-        ("Moksha Trikona (Water)", x0_col[1], y0_row[1]),
+    banner("TRIKONA CHART", "Birth & Current Transit Together - Fire, Earth, Air, Water")
+    chart_size = 130
+    x0 = (210 - chart_size) / 2
+    y0 = 42
+    draw_combined_diamond_chart_pdf(pdf, core_bodies, transit_core_bodies, b_asc["sign"], b_asc, x0, y0, chart_size)
+    pdf.set_y(y0 + chart_size + 8)
+    legend_items = [
+        ("Birth (black)", (58, 46, 31)),
+        ("Su", PLANET_TRANSIT_COLORS_RGB["Su"]), ("Mo", PLANET_TRANSIT_COLORS_RGB["Mo"]),
+        ("Ma", PLANET_TRANSIT_COLORS_RGB["Ma"]), ("Me", PLANET_TRANSIT_COLORS_RGB["Me"]),
+        ("Jp", PLANET_TRANSIT_COLORS_RGB["Jp"]), ("Ve", PLANET_TRANSIT_COLORS_RGB["Ve"]),
+        ("Sa", PLANET_TRANSIT_COLORS_RGB["Sa"]), ("Ra/Ke", PLANET_TRANSIT_COLORS_RGB["Ra"]),
     ]
-    for group_name, gx, gy in positions:
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(*GOLD)
-        pdf.set_xy(gx, gy - 7)
-        pdf.cell(mini_size, 6, group_name, align="C")
-        group_bodies = bodies_in_trikona_group(core_bodies, b_asc["sign"], group_name)
-        draw_diamond_chart_pdf(pdf, group_bodies, b_asc["sign"], b_asc, gx, gy, mini_size)
-    pdf.set_y(y0_row[1] + mini_size + 12)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_x(15)
+    for i, (label_, color) in enumerate(legend_items):
+        pdf.set_text_color(*color)
+        pdf.write(5, label_)
+        if i < len(legend_items) - 1:
+            pdf.set_text_color(*MUTED)
+            pdf.write(5, "   -   ")
+    pdf.ln(8)
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(*MUTED)
     pdf.multi_cell(0, 4.5,
-        "Each chart shows the birth lagna with only the grahas placed in that element's "
-        "three houses (Fire = 1,5,9; Earth = 2,6,10; Air = 3,7,11; Water = 4,8,12) - the "
-        "rest of the houses are left empty so that element's placements stand out clearly.")
+        "All grahas, birth and current transit together, listed ascending by degree within "
+        "each house. Birth positions are always black; each transit graha keeps its own fixed "
+        "colour so it's identifiable at a glance regardless of which house it's currently in.")
 
     out = pdf.output(dest="S")
     return out.encode("latin-1") if isinstance(out, str) else bytes(out)
@@ -2599,7 +2741,7 @@ def generate_kundali_html_report(birth_chart, form, transit_chart=None) -> str:
             return "—"
         parts = []
         for b in merged:
-            color = "#C4462B" if b["is_transit"] else "#3A2E1F"
+            color = PLANET_TRANSIT_COLORS.get(b["key"], "#C4462B") if b["is_transit"] else "#3A2E1F"
             parts.append(f'<span style="color:{color};">{b["key"]} {int(b["inSign"])}\u00b0 ({SIGNS[b["sign"]]})</span>')
         return ", ".join(parts)
 
@@ -2609,19 +2751,17 @@ def generate_kundali_html_report(birth_chart, form, transit_chart=None) -> str:
         for group_name, entries in _trikona_planets.items()
     )
 
-    # ---- Four mini diamond charts, one per Trikona element, each showing only
-    # that group's grahas (rest of the houses left empty) ----
-    trikona_mini_charts_html = ""
-    for group_name in TRIKONA_GROUP_HOUSES:
-        group_bodies = bodies_in_trikona_group(core_bodies, b_asc["sign"], group_name)
-        mini_svg = build_svg_chart(group_bodies, [], b_asc["sign"], show_nakshatra=False)
-        mini_svg = mini_svg.replace('width="720" height="720"', 'width="340" height="340"')
-        trikona_mini_charts_html += (
-            f'<div style="text-align:center;">'
-            f'<p style="color:#B8842E;font-weight:700;margin-bottom:6px;">{group_name}</p>'
-            f'{mini_svg}'
-            f'</div>'
+    # ---- One combined diamond chart: birth + transit grahas merged, ascending
+    # by degree per house, each transit graha in its own fixed colour ----
+    combined_chart_svg = build_combined_diamond_svg(core_bodies, _transit_core_bodies, b_asc["sign"])
+    trikona_legend_html = (
+        f'<span style="color:#3A2E1F;font-weight:700;">Birth (black)</span>'
+        + "".join(
+            f' &middot; <span style="color:{PLANET_TRANSIT_COLORS[k]};font-weight:700;">{k}</span>'
+            for k in ["Su", "Mo", "Ma", "Me", "Jp", "Ve", "Sa"]
         )
+        + f' &middot; <span style="color:{PLANET_TRANSIT_COLORS["Ra"]};font-weight:700;">Ra/Ke</span>'
+    )
 
     _lat, _lon, _tz = form["city"][2], form["city"][3], form["city"][4]
     _mw = compute_muhurta_windows(form["dob"].year, form["dob"].month, form["dob"].day, _lat, _lon, _tz)
@@ -2725,17 +2865,14 @@ def generate_kundali_html_report(birth_chart, form, transit_chart=None) -> str:
     <tr><th>Trikoṇa Group</th><th>Grahas</th></tr>
     {trikona_group_rows}
   </table>
-  <p class="footer" style="text-align:left;margin-top:6px;">
-  <span style="color:#3A2E1F;font-weight:700;">Black</span> = birth position &nbsp;&middot;&nbsp;
-  <span style="color:#C4462B;font-weight:700;">Red</span> = current transit position</p>
+  <p class="footer" style="text-align:left;margin-top:6px;">{trikona_legend_html}</p>
 
-  <h2>Trikoṇa Charts &middot; Fire, Earth, Air, Water</h2>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px;">
-    {trikona_mini_charts_html}
-  </div>
-  <p class="footer" style="text-align:left;margin-top:10px;">Each chart shows the birth lagna with only the
-  grahas placed in that element's three houses (Fire = 1,5,9; Earth = 2,6,10; Air = 3,7,11; Water = 4,8,12) —
-  the rest of the houses are left empty so that element's placements stand out clearly.</p>
+  <h2>Trikoṇa Chart &middot; Birth &amp; Current Transit Together</h2>
+  <div style="text-align:center;">{combined_chart_svg}</div>
+  <p class="footer" style="text-align:left;margin-top:10px;">{trikona_legend_html}<br>
+  All grahas, birth and current transit together, listed ascending by degree within each house.
+  Birth positions are always black; each transit graha keeps its own fixed colour so it's
+  identifiable at a glance regardless of which house it's currently in.</p>
 
   <h2>Muhūrta · Timings on the Birth Date</h2>
   <table>
