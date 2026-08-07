@@ -20,6 +20,15 @@ Razorpay setup (required for real payments):
     4. Also set your Streamlit app's public URL so the checkout redirect
        comes back to the right place:
          APP_BASE_URL=https://yourdomain.com
+
+Worldwide birthplace search (recommended):
+    pip install timezonefinder
+    This enables offline, DST-and-history-aware timezone lookup for any
+    latitude/longitude on Earth (via the IANA tz database), paired with
+    live place search against OpenStreetMap Nominatim at runtime — together
+    these cover essentially any city, town, or village worldwide, without
+    needing a static database embedded in this file. If timezonefinder
+    isn't installed, the app falls back to a cruder longitude/15 estimate.
 """
 
 import math
@@ -30,11 +39,20 @@ import re
 import secrets
 import sqlite3
 import time
+import zoneinfo
 from datetime import datetime, timedelta, date, time as dtime
 
 import streamlit as st
 import pandas as pd
 import requests
+
+try:
+    from timezonefinder import TimezoneFinder
+    _TZF = TimezoneFinder()
+    HAS_TZFINDER = True
+except ImportError:
+    _TZF = None
+    HAS_TZFINDER = False
 
 # ============================================================
 # ASTRONOMY ENGINE  (direct port of the JS math, same formulas)
@@ -203,6 +221,62 @@ def sunrise_utc_hours(y: int, mo: int, dd: int, lat: float, lon: float) -> float
     cosH = max(-1.0, min(1.0, cosH))
     H = math.acos(cosH) / D2R
     return 12.0 - lon / 15.0 - H / 15.0
+
+
+def get_historical_utc_offset(lat: float, lon: float, y: int, mo: int, dd: int,
+                               hh: int, mm: int, ss: int = 0) -> float:
+    """Real, DST-and-history-aware UTC offset for any lat/lon and any date, using
+    timezonefinder (offline, ships its own worldwide timezone-boundary polygons)
+    plus Python's built-in zoneinfo (the IANA tz database, which already encodes
+    every historical DST rule change a place has ever had). This replaces a fixed
+    per-city offset — which silently ignores daylight saving and any historical
+    timezone-rule changes — with the offset that actually applied at that exact
+    moment. Falls back to a crude longitude/15 estimate only if timezonefinder
+    isn't installed or the lookup fails (e.g. open ocean coordinates)."""
+    if HAS_TZFINDER and _TZF is not None:
+        try:
+            tzname = _TZF.timezone_at(lat=lat, lng=lon)
+            if tzname:
+                tz = zoneinfo.ZoneInfo(tzname)
+                dt = datetime(y, mo, dd, hh, mm, ss, tzinfo=tz)
+                offset = dt.utcoffset()
+                if offset is not None:
+                    return offset.total_seconds() / 3600
+        except Exception:
+            pass
+    return round(lon / 15.0 * 4) / 4  # crude fallback, rounded to nearest 15 minutes
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def geocode_place(query: str, limit: int = 8):
+    """Live worldwide place search via OpenStreetMap Nominatim — covers
+    essentially every city, town, and village on Earth (far beyond any static
+    list this app could realistically embed), including alternate and local
+    names. Cached per exact query string for an hour so repeated searches
+    within a session don't re-hit the API. Requires the deployed app's own
+    outbound internet access at runtime (works fine on Render; this call
+    can't be exercised from a network-restricted dev/test sandbox)."""
+    query = (query or "").strip()
+    if len(query) < 2:
+        return []
+    try:
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": query, "format": "jsonv2", "limit": limit, "addressdetails": 1},
+            headers={"User-Agent": "KundaliApp/1.0 (Vedic astrology birth-chart tool)"},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        out = []
+        for item in resp.json():
+            out.append({
+                "display_name": item.get("display_name", ""),
+                "lat": float(item["lat"]),
+                "lon": float(item["lon"]),
+            })
+        return out
+    except (requests.RequestException, ValueError, KeyError):
+        return []
 
 
 # ============================================================
@@ -3206,8 +3280,10 @@ saved_profile = load_profile(st.session_state["user"]["id"])
 # ---- Birth details form -------------------------------------------------
 st.markdown('<div class="kcard"><h4>Birth details</h4>', unsafe_allow_html=True)
 
-use_manual_coords = st.checkbox(
-    "Enter latitude / longitude manually (place not in the city list)", value=False
+place_mode = st.radio(
+    "Birth place source",
+    ["Quick-pick from city list", "Search worldwide (any place)", "Enter coordinates manually"],
+    horizontal=True, label_visibility="collapsed",
 )
 
 col1, col2, col3, col4, col5 = st.columns([1.2, 1.6, 1, 1, 0.8])
@@ -3215,48 +3291,11 @@ col1, col2, col3, col4, col5 = st.columns([1.2, 1.6, 1, 1, 0.8])
 with col1:
     name = st.text_input("Name", value=(saved_profile["name"] if saved_profile else ""), placeholder="Name of chart")
 
-if use_manual_coords:
-    # ---- Manual coordinates path: user supplies place name, lat, lon, tz directly ----
-    default_place = saved_profile["city_name"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else ""
-    default_mlat = saved_profile["lat"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 30.21
-    default_mlon = saved_profile["lon"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 74.95
-    default_mtz = saved_profile["tz"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 5.5
-    with col2:
-        place_name = st.text_input("Place name (for display only)", value=default_place, placeholder="e.g. Custom Town")
-        mcol1, mcol2, mcol3 = st.columns(3)
-        with mcol1:
-            manual_lat = st.number_input(
-                "Latitude", min_value=-90.0, max_value=90.0, value=float(default_mlat), step=0.0001, format="%.4f"
-            )
-        with mcol2:
-            manual_lon = st.number_input(
-                "Longitude", min_value=-180.0, max_value=180.0, value=float(default_mlon), step=0.0001, format="%.4f"
-            )
-        with mcol3:
-            manual_tz = st.number_input(
-                "UTC offset (h)", min_value=-12.0, max_value=14.0, value=float(default_mtz), step=0.25, format="%.2f"
-            )
-        st.caption(
-            f"{abs(manual_lat):.4f}°{'N' if manual_lat >= 0 else 'S'}, "
-            f"{abs(manual_lon):.4f}°{'E' if manual_lon >= 0 else 'W'} · "
-            f"UTC{'+' if manual_tz >= 0 else ''}{manual_tz}"
-        )
-    city = (place_name if place_name else "Custom location", "Manual entry", manual_lat, manual_lon, manual_tz)
-else:
-    default_city_query = saved_profile["city_name"] if (saved_profile and saved_profile.get("city_region") != "Manual entry") else "Bathinda"
-    with col2:
-        city_query = st.text_input("Birth place (city)", value=default_city_query)
-        matches = [c for c in CITIES if city_query.lower() in (c[0] + " " + c[1]).lower()]
-        if not matches:
-            matches = CITIES[:8]
-        city_labels = [f"{c[0]} · {c[1]}" for c in matches[:8]]
-        chosen_label = st.selectbox("Match", city_labels, label_visibility="collapsed")
-        city = matches[city_labels.index(chosen_label)]
-        st.caption(
-            f"{abs(city[2]):.2f}°{'N' if city[2] >= 0 else 'S'}, "
-            f"{abs(city[3]):.2f}°{'E' if city[3] >= 0 else 'W'} · UTC{'+' if city[4] >= 0 else ''}{city[4]}"
-        )
-
+# col3/col4 (date & time) are populated here in the code, ahead of col2 (place),
+# purely so the worldwide-search branch below can use the exact birth date/time
+# for a historically-accurate timezone lookup. st.columns() already fixed each
+# column's left-to-right screen position, so the on-screen layout is unaffected
+# by this reordering — only the code execution order changes.
 with col3:
     default_dob = date.fromisoformat(saved_profile["dob"]) if (saved_profile and saved_profile.get("dob")) else date(2026, 7, 16)
     dob = st.date_input(
@@ -3285,6 +3324,83 @@ with col4:
             "Second", min_value=0, max_value=59, value=default_tob.second, step=1, key="tob_second"
         )
     tob = dtime(int(tob_hour), int(tob_minute), int(tob_second))
+
+if place_mode == "Enter coordinates manually":
+    default_place = saved_profile["city_name"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else ""
+    default_mlat = saved_profile["lat"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 30.21
+    default_mlon = saved_profile["lon"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 74.95
+    default_mtz = saved_profile["tz"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 5.5
+    with col2:
+        place_name = st.text_input("Place name (for display only)", value=default_place, placeholder="e.g. Custom Town")
+        mcol1, mcol2, mcol3 = st.columns(3)
+        with mcol1:
+            manual_lat = st.number_input(
+                "Latitude", min_value=-90.0, max_value=90.0, value=float(default_mlat), step=0.0001, format="%.4f"
+            )
+        with mcol2:
+            manual_lon = st.number_input(
+                "Longitude", min_value=-180.0, max_value=180.0, value=float(default_mlon), step=0.0001, format="%.4f"
+            )
+        with mcol3:
+            manual_tz = st.number_input(
+                "UTC offset (h)", min_value=-12.0, max_value=14.0, value=float(default_mtz), step=0.25, format="%.2f"
+            )
+        st.caption(
+            f"{abs(manual_lat):.4f}°{'N' if manual_lat >= 0 else 'S'}, "
+            f"{abs(manual_lon):.4f}°{'E' if manual_lon >= 0 else 'W'} · "
+            f"UTC{'+' if manual_tz >= 0 else ''}{manual_tz}"
+        )
+    city = (place_name if place_name else "Custom location", "Manual entry", manual_lat, manual_lon, manual_tz)
+
+elif place_mode == "Search worldwide (any place)":
+    # Live global place search (OpenStreetMap Nominatim) + offline historical
+    # timezone lookup — covers essentially any city, town, or village on
+    # Earth, rather than only the ~90 places hardcoded in the quick-pick list.
+    with col2:
+        default_query = saved_profile["city_name"] if (saved_profile and saved_profile.get("city_region") == "Worldwide search") else ""
+        search_query = st.text_input(
+            "Birth place (any city, town, or village worldwide)",
+            value=default_query, placeholder="e.g. Hanumangarh, Rajasthan, India",
+        )
+        results = geocode_place(search_query) if search_query.strip() else []
+        if search_query.strip() and not results:
+            st.caption("No matches found (or the search is temporarily unreachable) — "
+                       "try a more specific query, or use Quick-pick / manual entry instead.")
+        if results:
+            result_labels = [r["display_name"] for r in results]
+            chosen_result_label = st.selectbox("Match", result_labels, label_visibility="collapsed")
+            chosen_result = results[result_labels.index(chosen_result_label)]
+            w_lat, w_lon = chosen_result["lat"], chosen_result["lon"]
+            w_tz = get_historical_utc_offset(
+                w_lat, w_lon, dob.year, dob.month, dob.day, tob.hour, tob.minute, tob.second
+            )
+            display_name = chosen_result["display_name"]
+            st.caption(
+                f"{abs(w_lat):.4f}°{'N' if w_lat >= 0 else 'S'}, "
+                f"{abs(w_lon):.4f}°{'E' if w_lon >= 0 else 'W'} · "
+                f"UTC{'+' if w_tz >= 0 else ''}{w_tz:.2f} on this date"
+                + ("" if HAS_TZFINDER else " (rough estimate — install `timezonefinder` for accuracy)")
+            )
+            city = (display_name.split(",")[0].strip(), display_name, w_lat, w_lon, w_tz)
+        else:
+            # nothing searched/selected yet — safe placeholder so the rest of
+            # the app still has a valid city tuple to compute a default chart from
+            city = ("Bathinda", "Punjab, India", 30.21, 74.95, 5.5)
+
+else:
+    default_city_query = saved_profile["city_name"] if (saved_profile and saved_profile.get("city_region") not in ("Manual entry", "Worldwide search")) else "Bathinda"
+    with col2:
+        city_query = st.text_input("Birth place (city)", value=default_city_query)
+        matches = [c for c in CITIES if city_query.lower() in (c[0] + " " + c[1]).lower()]
+        if not matches:
+            matches = CITIES[:8]
+        city_labels = [f"{c[0]} · {c[1]}" for c in matches[:8]]
+        chosen_label = st.selectbox("Match", city_labels, label_visibility="collapsed")
+        city = matches[city_labels.index(chosen_label)]
+        st.caption(
+            f"{abs(city[2]):.2f}°{'N' if city[2] >= 0 else 'S'}, "
+            f"{abs(city[3]):.2f}°{'E' if city[3] >= 0 else 'W'} · UTC{'+' if city[4] >= 0 else ''}{city[4]}"
+        )
 
 with col5:
     st.markdown("<br>", unsafe_allow_html=True)
