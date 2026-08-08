@@ -1517,8 +1517,10 @@ def _solid_sphere_svg(parts, defs, grad_id, cx, cy, r, base_hex, highlight_hex, 
                  f'stroke="rgba(0,0,0,0.15)" stroke-width="0.6"/>')
     if label:
         parts.append(f'<text x="{cx:.1f}" y="{cy:.1f}" text-anchor="middle" dominant-baseline="middle" '
-                      f'font-size="{r*0.85:.1f}" font-weight="700" fill="#ffffff" '
-                      f'font-family="Georgia, serif" opacity="0.95">{label}</text>')
+                      f'font-size="{r*1.05:.1f}" font-weight="700" fill="#ffffff" '
+                      f'font-family="Georgia, serif" opacity="0.97" '
+                      f'style="paint-order:stroke;stroke:rgba(0,0,0,0.25);stroke-width:{r*0.12:.2f}px;">'
+                      f'{label}</text>')
 
 
 # (base, highlight) glossy-sphere colours per graha — same hues as
@@ -1540,13 +1542,13 @@ def build_zodiac_hero_svg(size: int = 460) -> str:
     'solid' glossy planet spheres (pure SVG radial gradients — no external
     images) orbits just outside the wheel on a thin dashed path, plus small
     Kundli (diamond-chart) and Nakshatra (star) glyphs for extra flavour."""
-    pad = size * 0.22
+    pad = size * 0.34
     vb = size + pad * 2
     cx = cy = vb / 2
     R_outer = size * 0.44
     R_mid = size * 0.34
     R_inner = size * 0.14
-    R_orbit = size * 0.56
+    R_orbit = size * 0.72
     VS = "\ufe0e"
     zodiac = [c + VS for c in
               ["\u2648", "\u2649", "\u264a", "\u264b", "\u264c", "\u264d",
@@ -1572,29 +1574,39 @@ def build_zodiac_hero_svg(size: int = 460) -> str:
     ]
     parts = [f'<svg viewBox="0 0 {vb} {vb}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">']
 
-    # ---- outer orbit path (dashed) + solid planet spheres riding on it ----
+    # ---- outer orbit path: a soft double ring (solid + dashed) with small
+    # gold sparkles between the planets, well clear of the sign-name labels ----
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_orbit}" fill="none" stroke="#D8A845" '
+                 f'stroke-width="1.4" opacity="0.30"/>')
     parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_orbit}" fill="none" stroke="#B8842E" '
-                 f'stroke-width="1" stroke-dasharray="3,6" opacity="0.45"/>')
+                 f'stroke-width="1" stroke-dasharray="2,9" opacity="0.55"/>')
     orbit_keys = ["Su", "Mo", "Ma", "Me", "Jp", "Ve", "Sa"]
+    n_planets = len(orbit_keys)
+    for i in range(n_planets * 3):
+        if i % 3 == 0:
+            continue  # skip the angles where a planet sphere will sit
+        ang = i * (360 / (n_planets * 3))
+        sx, sy = pt(R_orbit, ang)
+        parts.append(f'<circle cx="{sx:.1f}" cy="{sy:.1f}" r="{size*0.006:.2f}" fill="#D8A845" opacity="0.6"/>')
     for i, key in enumerate(orbit_keys):
-        ang = i * (360 / len(orbit_keys))
+        ang = i * (360 / n_planets)
         px, py = pt(R_orbit, ang)
         base_hex, hi_hex = _SPHERE_COLORS[key]
-        _solid_sphere_svg(parts, defs, f"sph_{key}", px, py, size * 0.032, base_hex, hi_hex, label=key)
+        _solid_sphere_svg(parts, defs, f"sph_{key}", px, py, size * 0.044, base_hex, hi_hex, label=key)
 
     # ---- Kundli (diamond-chart) and Nakshatra (star) decorative glyphs, at
     # the top and bottom of the orbit ring ----
     kx, ky = pt(R_orbit, 0)
-    k_r = size * 0.026
-    parts.append(f'<rect x="{kx-k_r:.1f}" y="{ky-k_r-size*0.09:.1f}" width="{k_r*2:.1f}" height="{k_r*2:.1f}" '
-                 f'fill="#FFFDF3" stroke="#B8842E" stroke-width="1.4" '
-                 f'transform="rotate(45 {kx:.1f} {ky-k_r-size*0.09:.1f})"/>')
+    k_r = size * 0.032
+    parts.append(f'<rect x="{kx-k_r:.1f}" y="{ky-k_r-size*0.1:.1f}" width="{k_r*2:.1f}" height="{k_r*2:.1f}" '
+                 f'fill="#FFFDF3" stroke="#B8842E" stroke-width="1.6" '
+                 f'transform="rotate(45 {kx:.1f} {ky-k_r-size*0.1:.1f})"/>')
     nx2, ny2 = pt(R_orbit, 180)
     star_pts = []
     for i in range(10):
         sang = math.radians(i * 36 - 90)
-        srad = size * (0.028 if i % 2 == 0 else 0.012)
-        star_pts.append(f"{nx2 + srad*math.cos(sang):.1f},{ny2 + size*0.09 + srad*math.sin(sang):.1f}")
+        srad = size * (0.034 if i % 2 == 0 else 0.014)
+        star_pts.append(f"{nx2 + srad*math.cos(sang):.1f},{ny2 + size*0.1 + srad*math.sin(sang):.1f}")
     parts.append(f'<polygon points="{" ".join(star_pts)}" fill="#B8842E" opacity="0.85"/>')
 
     # ---- main wheel ----
