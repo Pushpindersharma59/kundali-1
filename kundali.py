@@ -1682,6 +1682,112 @@ def build_compass_star_svg(size: int = 90) -> str:
     )
 
 
+def build_om_medallion_svg(size: int = 420) -> str:
+    """A larger, more ornate Om medallion: concentric decorative rings behind
+    the Devanagari Om glyph, standing on its own (no zodiac wheel) — used as
+    the anchor of the new scattered-planets hero layout."""
+    vb = size
+    cx = cy = vb / 2
+    OM_FONTS = ("'Noto Sans Devanagari','Nirmala UI','Kohinoor Devanagari',"
+                "'Devanagari Sangam MN','Mangal',sans-serif")
+    parts = [
+        f'<svg viewBox="0 0 {vb} {vb}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">',
+        '<defs><radialGradient id="omGlow" cx="50%" cy="50%" r="55%">'
+        '<stop offset="0%" stop-color="#FFF6D8" stop-opacity="0.9"/>'
+        '<stop offset="70%" stop-color="#FFE9A8" stop-opacity="0.3"/>'
+        '<stop offset="100%" stop-color="#FFE9A8" stop-opacity="0"/>'
+        '</radialGradient></defs>',
+        f'<circle cx="{cx}" cy="{cy}" r="{size*0.46:.1f}" fill="url(#omGlow)"/>',
+    ]
+    for r_frac, dash, op in [(0.42, "2,10", 0.35), (0.34, None, 0.4), (0.27, "1,6", 0.45)]:
+        r = size * r_frac
+        dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
+        parts.append(f'<circle cx="{cx}" cy="{cy}" r="{r:.1f}" fill="none" stroke="#B8842E" '
+                      f'stroke-width="1"{dash_attr} opacity="{op}"/>')
+    for i in range(24):
+        ang = math.radians(i * 15)
+        r1, r2 = size * 0.34, size * 0.365
+        x1, y1 = cx + r1 * math.cos(ang), cy + r1 * math.sin(ang)
+        x2, y2 = cx + r2 * math.cos(ang), cy + r2 * math.sin(ang)
+        parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+                      f'stroke="#B8842E" stroke-width="1" opacity="0.4"/>')
+    parts.append(f'<text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="central" '
+                 f'font-size="{size*0.32:.1f}" fill="#B8842E" font-family="{OM_FONTS}">\u0950</text>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+_ORBIT_PLANETS = [
+    # key, fx, fy, radius_frac(of height), has_rings
+    ("Jp", 0.40, 0.15, 0.075, False),
+    ("Ma", 0.36, 0.33, 0.050, False),
+    ("Mo", 0.84, 0.10, 0.045, False),
+    ("Me", 0.58, 0.45, 0.045, False),
+    ("Ve", 0.38, 0.60, 0.062, False),
+    ("Sa", 0.62, 0.72, 0.072, True),
+    ("Ra", 0.34, 0.85, 0.050, False),
+    ("Ke", 0.84, 0.86, 0.045, False),
+    ("Su", 0.80, 0.38, 0.10, False),
+]
+_PLANET_FULLNAMES = {
+    "Su": "Sun", "Mo": "Moon", "Ma": "Mars", "Me": "Mercury", "Jp": "Jupiter",
+    "Ve": "Venus", "Sa": "Saturn", "Ra": "Rahu", "Ke": "Ketu",
+}
+_SPHERE_COLORS_EXT = dict(_SPHERE_COLORS)
+_SPHERE_COLORS_EXT["Ra"] = ("#6C5B7B", "#D8CFE0")
+_SPHERE_COLORS_EXT["Ke"] = ("#7A4B2A", "#E6C9A8")
+
+
+def build_orbit_scene_svg(width: int = 1000, height: int = 620) -> str:
+    """Scattered 'solid' glossy planets (pure SVG radial gradients) drifting
+    across a few faint elliptical orbit paths, each with its own small pill
+    label alongside it rather than text crammed onto the sphere — the
+    composition this is modelled on has no visible zodiac wheel, just the
+    planets and orbit paths, so this is a separate scene from
+    build_zodiac_hero_svg rather than a variant of it."""
+    defs = []
+    parts = [f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" style="display:block;">']
+
+    orbit_paths = [
+        (width * 0.66, height * 0.5, width * 0.30, height * 0.42),
+        (width * 0.66, height * 0.5, width * 0.20, height * 0.28),
+        (width * 0.66, height * 0.5, width * 0.09, height * 0.14),
+    ]
+    for ex, ey, rx, ry in orbit_paths:
+        parts.append(f'<ellipse cx="{ex:.1f}" cy="{ey:.1f}" rx="{rx:.1f}" ry="{ry:.1f}" '
+                      f'fill="none" stroke="#D8A845" stroke-width="1" stroke-dasharray="2,8" opacity="0.35"/>')
+
+    for key, fx, fy, r_frac, has_rings in _ORBIT_PLANETS:
+        px, py = width * fx, height * fy
+        r = height * r_frac
+        base_hex, hi_hex = _SPHERE_COLORS_EXT[key]
+        if key == "Su":
+            defs.append(
+                f'<radialGradient id="sunFlare" cx="50%" cy="50%" r="60%">'
+                f'<stop offset="0%" stop-color="#FFF3C4" stop-opacity="0.9"/>'
+                f'<stop offset="60%" stop-color="#FFD98A" stop-opacity="0.25"/>'
+                f'<stop offset="100%" stop-color="#FFD98A" stop-opacity="0"/></radialGradient>'
+            )
+            parts.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="{r*2.1:.1f}" fill="url(#sunFlare)"/>')
+        if has_rings:
+            parts.append(f'<ellipse cx="{px:.1f}" cy="{py:.1f}" rx="{r*1.7:.1f}" ry="{r*0.5:.1f}" '
+                          f'fill="none" stroke="#B8842E" stroke-width="{r*0.12:.1f}" opacity="0.6" '
+                          f'transform="rotate(-18 {px:.1f} {py:.1f})"/>')
+        _solid_sphere_svg(parts, defs, f"orbit_{key}", px, py, r, base_hex, hi_hex)
+        label_x = px + r + 10
+        label_text = _PLANET_FULLNAMES[key]
+        label_w = len(label_text) * 7.2 + 22
+        parts.append(f'<rect x="{label_x:.1f}" y="{py-11:.1f}" width="{label_w:.1f}" height="22" rx="11" '
+                      f'fill="#FFFDF3" stroke="#F0DE94" stroke-width="1" opacity="0.95"/>')
+        parts.append(f'<circle cx="{label_x+12:.1f}" cy="{py:.1f}" r="3" fill="{base_hex}"/>')
+        parts.append(f'<text x="{label_x+22:.1f}" y="{py:.1f}" dominant-baseline="middle" '
+                      f'font-size="13" fill="#3A2E1F" font-family="Georgia, serif">{label_text}</text>')
+
+    svg_open = parts[0]
+    body = "".join(parts[1:])
+    return svg_open + "<defs>" + "".join(defs) + "</defs>" + body + "</svg>"
+
+
 FEATURE_STRIP = [
     ("\U0001fa90", "Kundali Analysis", "Detailed insights from your real birth chart"),
     ("\u263e", "Nakshatra Guide", "27 nakshatras — deities, symbols & meanings"),
@@ -1698,82 +1804,123 @@ def render_auth_screen():
     """Full-page login / signup flow. Returns nothing — sets
     st.session_state['user'] and reruns once authenticated."""
     NAVY = "#1B3A6B"
+    ORANGE = "#E29A2E"
 
     st.markdown(
         f"""
         <style>
         .stApp {{
             background:
-                radial-gradient(circle at 8% 8%, rgba(255,221,150,0.85) 0%, rgba(255,221,150,0) 32%),
+                radial-gradient(circle at 8% 8%, rgba(255,221,150,0.55) 0%, rgba(255,221,150,0) 32%),
                 radial-gradient(1.6px 1.6px at 18% 14%, #ffffff 100%, transparent),
                 radial-gradient(1.6px 1.6px at 62% 7%, #ffffff 100%, transparent),
                 radial-gradient(1.6px 1.6px at 80% 18%, #ffffff 100%, transparent),
                 radial-gradient(1.6px 1.6px at 40% 22%, #ffffff 100%, transparent),
-                radial-gradient(1.6px 1.6px at 90% 10%, #ffffff 100%, transparent),
-                radial-gradient(1.6px 1.6px at 70% 28%, #ffffff 100%, transparent),
-                radial-gradient(1.6px 1.6px at 30% 5%, #ffffff 100%, transparent),
-                linear-gradient(180deg, #eaf3fb 0%, #f8f1de 55%, #f5e8c3 100%) !important;
+                linear-gradient(180deg, #f7f9fc 0%, #f9f4e6 55%, #f6ecd2 100%) !important;
             background-attachment: fixed;
         }}
-        .hero-tagline {{ letter-spacing: 0.32em; font-size: 13px; color: {NAVY};
-            text-align: center; margin: 6px 0 0; font-weight: 600; opacity: 0.8; }}
-        .hero-brand {{ text-align: center; color: {NAVY}; font-family: Georgia, serif;
-            font-size: 46px; letter-spacing: 0.05em; margin: 6px 0 0; font-weight: 700; }}
-        .hero-divider {{ width: 70px; height: 2px; background: {C['gold']}; margin: 16px auto 18px; opacity: 0.7; }}
-        .hero-headline {{ color: {NAVY}; font-family: Georgia, serif; font-size: 27px;
-            font-weight: 700; text-align: center; margin: 0 0 10px; }}
-        .hero-desc {{ color: {C['muted']}; text-align: center; font-size: 15px; line-height: 1.5;
-            max-width: 420px; margin: 0 auto 22px; }}
-        .welcome-back {{ color: {C['gold']}; letter-spacing: 0.18em; font-size: 13px; font-weight: 700;
-            text-align: center; margin: 4px 0 12px; }}
+        .topnav {{
+            display: flex; align-items: center; justify-content: space-between;
+            background: rgba(255,255,255,0.85); border-bottom: 1px solid {C['line']};
+            padding: 10px 26px; margin: -1rem -5rem 28px; border-radius: 0 0 14px 14px;
+            flex-wrap: wrap; gap: 10px;
+        }}
+        .topnav-brand {{ display: flex; align-items: center; gap: 10px; }}
+        .topnav-brand-text {{ font-family: Georgia, serif; }}
+        .topnav-brand-text .p1 {{ color: {NAVY}; font-size: 22px; font-weight: 700; }}
+        .topnav-brand-text .p2 {{ color: {ORANGE}; font-size: 22px; font-weight: 700; }}
+        .topnav-tagline {{ color: {C['muted']}; font-size: 9px; letter-spacing: 0.15em; margin-top: -2px; }}
+        .topnav-links {{ display: flex; gap: 20px; flex-wrap: wrap; }}
+        .topnav-links span {{ color: {NAVY}; font-size: 13.5px; font-weight: 600; white-space: nowrap; }}
+        .topnav-links span.active {{ color: {ORANGE}; border-bottom: 2px solid {ORANGE}; padding-bottom: 4px; }}
+        .topnav-signin {{ border: 1px solid {ORANGE}; color: {ORANGE}; border-radius: 20px;
+            padding: 6px 18px; font-size: 13.5px; font-weight: 700; white-space: nowrap; }}
+        .hero-headline {{ color: {NAVY}; font-family: Georgia, serif; font-size: 32px;
+            font-weight: 700; margin: 4px 0 10px; }}
+        .hero-headline .accent {{ color: {ORANGE}; }}
+        .hero-desc {{ color: {C['muted']}; font-size: 15px; line-height: 1.6; max-width: 420px; margin: 0 0 22px; }}
+        .welcome-back {{ color: {ORANGE}; letter-spacing: 0.1em; font-size: 15px; font-weight: 700;
+            text-align: center; margin: 4px 0 14px; }}
         div[data-testid="stTabs"] {{
-            background: rgba(255,255,255,0.88); border: 1px solid {C['line']}; border-radius: 16px;
-            padding: 8px 26px 22px; box-shadow: 0 8px 26px rgba(27,58,107,0.14); max-width: 440px;
-            margin: 0 auto;
+            background: rgba(255,255,255,0.92); border: 1px solid {C['line']}; border-radius: 16px;
+            padding: 10px 26px 22px; box-shadow: 0 10px 30px rgba(27,58,107,0.12); max-width: 440px;
         }}
         div[data-testid="stTabs"] button[role="tab"] {{ font-weight: 700; letter-spacing: 0.04em; color: {NAVY}; }}
         div[data-testid="stTabs"] .stButton button {{
-            background: {NAVY} !important; color: #fff !important; border: none !important;
-            font-weight: 700; letter-spacing: 0.05em;
+            background: linear-gradient(90deg, {ORANGE}, #F0B94A) !important; color: #fff !important;
+            border: none !important; font-weight: 700; letter-spacing: 0.05em; border-radius: 10px !important;
         }}
         .feature-strip {{
-            background: rgba(255,255,255,0.92); border: 1px solid {C['line']}; border-radius: 18px;
-            padding: 26px 20px 10px; margin-top: 36px; box-shadow: 0 4px 16px rgba(27,58,107,0.08);
+            background: rgba(255,255,255,0.94); border: 1px solid {C['line']}; border-radius: 18px;
+            padding: 22px 26px; margin-top: 30px; box-shadow: 0 4px 16px rgba(27,58,107,0.08);
         }}
-        .feature-item {{ text-align: center; padding-bottom: 22px; }}
-        .feature-icon {{ font-size: 30px; margin-bottom: 8px; }}
-        .feature-title {{ color: {NAVY}; font-weight: 700; font-size: 14px; letter-spacing: 0.03em;
-            text-transform: uppercase; margin-bottom: 4px; }}
+        .feature-item {{ display: flex; align-items: flex-start; gap: 14px; padding: 14px 10px; }}
+        .feature-icon-badge {{
+            flex-shrink: 0; width: 46px; height: 46px; border-radius: 50%;
+            background: {C['panelSoft']}; border: 1px solid {C['line']};
+            display: flex; align-items: center; justify-content: center; font-size: 20px;
+        }}
+        .feature-title {{ color: {NAVY}; font-weight: 700; font-size: 14px; letter-spacing: 0.02em;
+            text-transform: uppercase; margin-bottom: 3px; }}
         .feature-desc {{ color: {C['muted']}; font-size: 12.5px; line-height: 1.4; }}
+        .trust-badge {{
+            text-align: center; margin: 18px auto 0; max-width: 620px; padding: 10px 20px;
+            border: 1px solid {C['line']}; border-radius: 24px; background: rgba(255,255,255,0.7);
+            color: {C['muted']}; font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+        }}
+        .trust-badge span {{ color: {NAVY}; }}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    hero_l, hero_r = st.columns([1.05, 1])
+    # ---- Top navigation bar (decorative outside the feature grid it points
+    # to — the real functionality lives behind sign-in, one page at a time) ----
+    st.markdown(
+        f"""
+        <div class="topnav">
+            <div class="topnav-brand">
+                <div style="max-width:38px;">{build_compass_star_svg(38)}</div>
+                <div class="topnav-brand-text">
+                    <div><span class="p1">Planets</span><span class="p2">Path</span></div>
+                    <div class="topnav-tagline">DISCOVER &middot; REFLECT &middot; GROW</div>
+                </div>
+            </div>
+            <div class="topnav-links">
+                <span class="active">Home</span>
+                <span>Kundali Analysis</span>
+                <span>Nakshatra Guide</span>
+                <span>Planetary Transits</span>
+                <span>Divisional Charts</span>
+                <span>Remedies</span>
+                <span>Reports</span>
+            </div>
+            <div class="topnav-signin">Sign In</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    hero_l, hero_r = st.columns([1, 1.3])
 
     with hero_l:
         st.markdown(
-            f'<div style="max-width:84px;margin:0 auto;">{build_compass_star_svg(84)}</div>',
+            '<p class="hero-headline">Your <span class="accent">Birth</span> Chart Awaits</p>',
             unsafe_allow_html=True,
         )
-        st.markdown('<p class="hero-brand">Kuṇḍalī</p>', unsafe_allow_html=True)
-        st.markdown('<p class="hero-tagline">DISCOVER &middot; REFLECT &middot; GROW</p>', unsafe_allow_html=True)
-        st.markdown('<div class="hero-divider"></div>', unsafe_allow_html=True)
-        st.markdown('<p class="hero-headline">Your Birth Chart Awaits</p>', unsafe_allow_html=True)
         st.markdown(
             '<p class="hero-desc">Explore Vedic astrology, nakṣatras, divisional charts, live '
             'planetary transits, and more — every calculation powered by real astronomy.</p>',
             unsafe_allow_html=True,
         )
-        st.markdown('<p class="welcome-back">WELCOME BACK</p>', unsafe_allow_html=True)
+        st.markdown('<p class="welcome-back">&#10022; Welcome Back &#10022;</p>', unsafe_allow_html=True)
 
         tab_login, tab_signup = st.tabs(["SIGN IN", "NEW SIGN UP"])
 
         with tab_login:
             identifier = st.text_input("Username", key="login_identifier", placeholder="User Name")
             password = st.text_input("Password", type="password", key="login_password", placeholder="Password")
-            if st.button("Sign In", use_container_width=True, key="signin_btn"):
+            if st.button("Sign In  →", use_container_width=True, key="signin_btn"):
                 if not identifier or not password:
                     st.error("Enter your username and password.")
                 else:
@@ -1812,22 +1959,35 @@ def render_auth_screen():
                         st.success("Account created — you can sign in now.")
 
     with hero_r:
-        wheel_svg = build_zodiac_hero_svg(440)
+        om_svg = build_om_medallion_svg(320)
+        orbit_svg = build_orbit_scene_svg(1000, 620)
         st.markdown(
-            f'<div style="max-width:520px; margin:0 auto;">{wheel_svg}</div>',
+            f"""
+            <div style="position:relative; max-width:640px; margin:0 auto;">
+                <div style="position:absolute; left:0; top:8%; width:32%;">{om_svg}</div>
+                <div>{orbit_svg}</div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
     feature_html = ['<div class="feature-strip"><div style="display:grid;'
-                     'grid-template-columns:repeat(4,1fr);gap:6px;">']
+                     'grid-template-columns:repeat(4,1fr);gap:4px;">']
     for icon, title, desc in FEATURE_STRIP:
         feature_html.append(
-            f'<div class="feature-item"><div class="feature-icon">{icon}</div>'
-            f'<div class="feature-title">{title}</div>'
-            f'<div class="feature-desc">{desc}</div></div>'
+            f'<div class="feature-item">'
+            f'<div class="feature-icon-badge">{icon}</div>'
+            f'<div><div class="feature-title">{title}</div>'
+            f'<div class="feature-desc">{desc}</div></div></div>'
         )
     feature_html.append("</div></div>")
     st.markdown("".join(feature_html), unsafe_allow_html=True)
+
+    st.markdown(
+        '<div class="trust-badge"><span>&#128737; Accurate Calculations</span> &middot; '
+        '<span>Real Astronomy Data</span> &middot; <span>Trusted Insights</span></div>',
+        unsafe_allow_html=True,
+    )
 
 # ============================================================
 # PREMIUM: Kundali report generation (PDF, with HTML fallback)
