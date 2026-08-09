@@ -2717,6 +2717,10 @@ MUHURTA_ACTIVITIES = {
         "weekdays": [3, 4, 5],  # Wed, Thu, Fri
         "nakshatras": [0, 7, 12, 13, 14, 16, 26],  # Aswini, Pushya, Hasta, Chitra, Swati, Anuradha, Revati
     },
+    "Starting a New Job": {
+        "weekdays": [1, 3, 4, 5],  # Mon, Wed, Thu, Fri
+        "nakshatras": [0, 7, 11, 12, 13, 14, 16, 20, 25, 26],  # Aswini, Pushya, U.Phalguni, Hasta, Chitra, Swati, Anuradha, U.Ashadha, U.Bhadrapada, Revati
+    },
     "Sign an agreement": {
         "weekdays": [3, 4, 5],
         "nakshatras": [0, 7, 12, 13, 14, 16, 26],
