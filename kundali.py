@@ -2334,6 +2334,120 @@ def navtara_tara_index(nak_idx: int, birth_nak_idx: int) -> int:
     return ((nak_idx - birth_nak_idx) % 27) % 9
 
 
+# ============================================================
+# COMPATIBILITY CHECK — Moon, Ascendant & Jupiter (focused synastry)
+# ============================================================
+# Deliberately NOT the full classical Ashtakoota Guna Milan (which checks
+# eight factors — Varna, Vashya, Tara, Yoni, Graha Maitri, Gana, Bhakoot,
+# Nadi — scored out of 36 and needs several more precise classical lookup
+# tables than are built into this app). This is a focused subset checking
+# only Moon, Ascendant, and Jupiter, as requested — scored out of its own
+# 16-point scale so it's never confused with a genuine 36-point Guna Milan
+# result. See the disclaimer shown alongside the results.
+
+RASHI_LORD = {}
+for _pk, _signs in OWN_SIGNS.items():
+    for _s in _signs:
+        RASHI_LORD[_s] = _pk
+
+
+def _maitri_pair_score(k1: str, k2: str) -> float:
+    """0-1 friendliness between two graha keys (their Naisargika Maitri, averaged
+    both directions since the classical table isn't always symmetric)."""
+    if k1 == k2:
+        return 1.0
+    rel1 = GRAHA_MAITRI.get(k1, {})
+    rel2 = GRAHA_MAITRI.get(k2, {})
+    def _side(rel, other):
+        if other in rel.get("friends", []):
+            return 1.0
+        if other in rel.get("enemies", []):
+            return 0.0
+        return 0.5
+    return (_side(rel1, k2) + _side(rel2, k1)) / 2
+
+
+def compute_compatibility(chart_a: dict, chart_b: dict) -> dict:
+    """Scores compatibility between two birth charts across Moon (nakshatra tara
+    + rashi-lord friendship), Ascendant (lord friendship + house relationship),
+    and Jupiter (dignity + cross-placement to the partner's Moon)."""
+    a_moon = next(b for b in chart_a["bodies"] if b["key"] == "Mo")
+    b_moon = next(b for b in chart_b["bodies"] if b["key"] == "Mo")
+    a_asc = next(b for b in chart_a["bodies"] if b["key"] == "As")
+    b_asc = next(b for b in chart_b["bodies"] if b["key"] == "As")
+    a_jp = next(b for b in chart_a["bodies"] if b["key"] == "Jp")
+    b_jp = next(b for b in chart_b["bodies"] if b["key"] == "Jp")
+
+    components = []
+
+    tara_ab = navtara_tara_index(b_moon["nakIdx"], a_moon["nakIdx"])
+    tara_ba = navtara_tara_index(a_moon["nakIdx"], b_moon["nakIdx"])
+    good_ab, good_ba = NAVTARA_INFO[tara_ab]["good"], NAVTARA_INFO[tara_ba]["good"]
+    tara_score = (int(good_ab) + int(good_ba)) / 2 * 3
+    components.append((
+        "Moon Nakshatra Tara", tara_score, 3,
+        f"{NAKSHATRAS[a_moon['nakIdx']]} \u2194 {NAKSHATRAS[b_moon['nakIdx']]} "
+        f"({NAVTARA_INFO[tara_ab]['name']} / {NAVTARA_INFO[tara_ba]['name']})",
+    ))
+
+    a_moon_lord, b_moon_lord = RASHI_LORD[a_moon["sign"]], RASHI_LORD[b_moon["sign"]]
+    moon_maitri_score = _maitri_pair_score(a_moon_lord, b_moon_lord) * 3
+    components.append((
+        "Moon Sign Lord Friendship", moon_maitri_score, 3,
+        f"{SIGNS[a_moon['sign']]} ({a_moon_lord}) \u2194 {SIGNS[b_moon['sign']]} ({b_moon_lord})",
+    ))
+
+    a_asc_lord, b_asc_lord = RASHI_LORD[a_asc["sign"]], RASHI_LORD[b_asc["sign"]]
+    lagna_maitri_score = _maitri_pair_score(a_asc_lord, b_asc_lord) * 2
+    components.append((
+        "Ascendant Lord Friendship", lagna_maitri_score, 2,
+        f"{SIGNS[a_asc['sign']]} ({a_asc_lord}) \u2194 {SIGNS[b_asc['sign']]} ({b_asc_lord})",
+    ))
+
+    dist = ((b_asc["sign"] - a_asc["sign"]) % 12) + 1
+    if dist in (1, 5, 9):
+        house_score = 2.0
+    elif dist in (4, 7, 10):
+        house_score = 1.5
+    elif dist in (6, 8, 12):
+        house_score = 0.0
+    else:
+        house_score = 1.0
+    components.append((
+        "Ascendant House Relationship", house_score, 2, f"{dist} sign(s) apart",
+    ))
+
+    a_jp_dignity = graha_dignity("Jp", a_jp["sign"])
+    b_jp_dignity = graha_dignity("Jp", b_jp["sign"])
+    dignity_pts = {"Exalted": 1.5, "Own Sign": 1.5, "Neutral": 0.75, "Debilitated": 0.0}
+    jp_dignity_score = dignity_pts[a_jp_dignity] + dignity_pts[b_jp_dignity]
+    components.append((
+        "Jupiter Dignity", jp_dignity_score, 3, f"{a_jp_dignity} / {b_jp_dignity}",
+    ))
+
+    dist_a_jp_to_b_moon = ((b_moon["sign"] - a_jp["sign"]) % 12) + 1
+    dist_b_jp_to_a_moon = ((a_moon["sign"] - b_jp["sign"]) % 12) + 1
+    good_counts = {1, 3, 5, 7, 9, 11}
+    cross_score = (int(dist_a_jp_to_b_moon in good_counts) + int(dist_b_jp_to_a_moon in good_counts)) / 2 * 3
+    components.append((
+        "Jupiter \u2194 Moon Cross Placement", cross_score, 3,
+        f"{dist_a_jp_to_b_moon} / {dist_b_jp_to_a_moon} sign(s) apart",
+    ))
+
+    total = sum(c[1] for c in components)
+    max_total = sum(c[2] for c in components)
+    pct = total / max_total * 100 if max_total else 0
+    if pct >= 75:
+        verdict = "Strong alignment"
+    elif pct >= 55:
+        verdict = "Good, workable alignment"
+    elif pct >= 35:
+        verdict = "Mixed — some friction likely"
+    else:
+        verdict = "Significant friction indicated"
+    return {"components": components, "total": total, "max_total": max_total, "pct": pct, "verdict": verdict}
+
+
 def render_navtara_chakra_tab(default_birth_nak_idx: int, tz: float):
     import calendar as _cal
 
@@ -2575,6 +2689,97 @@ def compute_muhurta_windows(y: int, mo: int, dd: int, lat: float, lon: float, tz
         "gulika_kalam": part_window(GULIKA_KALAM_PART[weekday]),
         "abhijit": (noon_local - muhurta_len / 2, noon_local + muhurta_len / 2),
     }
+
+
+# ============================================================
+# MUHURTA FINDER — activity-based electional search
+# ============================================================
+# General traditional guidance compiled from commonly published Panchang
+# references (favourable weekday + nakshatra per activity type). This is
+# NOT a substitute for a full professional muhurta consultation, which also
+# weighs the specific lagna at the moment, planetary strength/affliction,
+# and doshas beyond what's checked here — see the caveat shown with results.
+
+MUHURTA_ACTIVITIES = {
+    "Buy a vehicle": {
+        "weekdays": [3, 4, 5],  # Wed, Thu, Fri
+        "nakshatras": [0, 4, 6, 7, 12, 13, 14, 16, 21, 22, 26],  # Aswini, Mrigashira, Punarvasu, Pushya, Hasta, Chitra, Swati, Anuradha, Shravana, Dhanishtha, Revati
+    },
+    "Buy or register property": {
+        "weekdays": [1, 3, 4, 5],  # Mon, Wed, Thu, Fri
+        "nakshatras": [3, 4, 11, 12, 14, 16, 20, 25, 26],  # Rohini, Mrigashira, U.Phalguni, Hasta, Swati, Anuradha, U.Ashadha, U.Bhadrapada, Revati
+    },
+    "Griha Pravesh": {
+        "weekdays": [1, 3, 4, 5],  # Mon, Wed, Thu, Fri
+        "nakshatras": [3, 4, 11, 12, 14, 16, 20, 25, 26],
+    },
+    "Start a business": {
+        "weekdays": [3, 4, 5],  # Wed, Thu, Fri
+        "nakshatras": [0, 7, 12, 13, 14, 16, 26],  # Aswini, Pushya, Hasta, Chitra, Swati, Anuradha, Revati
+    },
+    "Sign an agreement": {
+        "weekdays": [3, 4, 5],
+        "nakshatras": [0, 7, 12, 13, 14, 16, 26],
+    },
+    "Begin travel": {
+        "weekdays": [0, 1, 3, 4, 5],  # Sun, Mon, Wed, Thu, Fri
+        "nakshatras": [0, 7, 12, 21, 26],  # Aswini, Pushya, Hasta, Shravana, Revati
+    },
+    "Spiritual practice": {
+        "weekdays": [1, 4, 5],  # Mon, Thu, Fri
+        "nakshatras": [7, 11, 20, 21, 25, 26],  # Pushya, U.Phalguni, U.Ashadha, Shravana, U.Bhadrapada, Revati
+        "relax_tithi_rule": True,  # rikta/amavasya avoidance doesn't apply the same way here
+    },
+}
+
+RIKTA_TITHI_IDX = {3, 8, 13}  # 4th, 9th, 14th of each paksha (0-indexed within paksha)
+
+
+def find_muhurta_windows(activity: str, start_date: date, range_days: int, lat: float, lon: float, tz: float,
+                          exclude_kalam_overlap: bool = True, max_results: int = 10):
+    """Scans a date range and scores each day's Abhijit Muhurta window against
+    classical rules for the given activity: favourable weekday, favourable
+    nakshatra (Moon's nakshatra at midday), and avoiding rikta/amavasya tithi.
+    Returns the top-scoring days (score = fraction of rules satisfied)."""
+    rules = MUHURTA_ACTIVITIES.get(activity)
+    if rules is None:
+        return []
+    results = []
+    for i in range(range_days):
+        d = start_date + timedelta(days=i)
+        mw = compute_muhurta_windows(d.year, d.month, d.day, lat, lon, tz)
+        abhijit_mid_hour = (mw["abhijit"][0] + mw["abhijit"][1]) / 2
+        hh = int(abhijit_mid_hour) % 24
+        mm = int(round((abhijit_mid_hour % 1) * 60))
+        chart = compute_chart(d.year, d.month, d.day, hh, mm, lat, lon, tz)
+        pan = chart["panchanga"]
+        weekday = d.isoweekday() % 7
+
+        checks = []
+        checks.append(weekday in rules["weekdays"])
+        if not rules.get("relax_tithi_rule"):
+            tithi_in_paksha = pan["tithiIdx"] % 15
+            checks.append(tithi_in_paksha not in RIKTA_TITHI_IDX and pan["tithiIdx"] != 29)
+        checks.append(pan["nakIdx"] in rules["nakshatras"])
+        if exclude_kalam_overlap:
+            a0, a1 = mw["abhijit"]
+            overlaps = False
+            for k in ("rahu_kalam", "yamaganda", "gulika_kalam"):
+                k0, k1 = mw[k]
+                if a0 < k1 and k0 < a1:
+                    overlaps = True
+            checks.append(not overlaps)
+
+        score = sum(checks) / len(checks) if checks else 0
+        if score >= 0.5:
+            results.append({
+                "date": d, "weekday": weekday, "score": score,
+                "abhijit": mw["abhijit"], "tithi_idx": pan["tithiIdx"],
+                "paksha": pan["paksha"], "tithi_name": pan["tithiName"],
+                "yoga_idx": pan["yogaIdx"], "nak_idx": pan["nakIdx"],
+            })
+    results.sort(key=lambda r: (-r["score"], r["date"]))
+    return results[:max_results]
 
 
 def _fmt_deg_ascii(x: float) -> str:
@@ -3803,8 +4008,8 @@ if is_premium(user_id):
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
-    tab_transit, tab_remedy, tab_navtara = st.tabs(
-        ["🔄 Current Transit", "📿 Day-wise Remedies", "🌙 Navtara Chakra"]
+    tab_transit, tab_remedy, tab_navtara, tab_muhurta, tab_compat = st.tabs(
+        ["🔄 Current Transit", "📿 Day-wise Remedies", "🌙 Navtara Chakra", "🕉️ Panchang & Muhurta", "💞 Compatibility"]
     )
 
     with tab_transit:
@@ -3849,6 +4054,182 @@ if is_premium(user_id):
 
     with tab_navtara:
         render_navtara_chakra_tab(b_moon["nakIdx"], tz)
+
+    with tab_muhurta:
+        pm_mode = st.radio(
+            "Mode", ["Daily Panchang", "Find Muhurta"], horizontal=True, key="pm_mode",
+            label_visibility="collapsed",
+        )
+
+        if pm_mode == "Daily Panchang":
+            pm_date = st.date_input("Date", value=date.today(), key="pm_panchang_date")
+            pmw = compute_muhurta_windows(pm_date.year, pm_date.month, pm_date.day, lat, lon, tz)
+            pm_chart = compute_chart(pm_date.year, pm_date.month, pm_date.day, 12, 0, lat, lon, tz)
+            pm_pan = pm_chart["panchanga"]
+            st.markdown(
+                f"""
+                <div class="kcard" style="margin-top:10px;">
+                  <div class="krow"><span class="kmuted">Vāra</span><span>{VARAS[pm_date.isoweekday() % 7]}</span></div>
+                  <div class="krow"><span class="kmuted">Tithi</span><span>{pm_pan['paksha']} {pm_pan['tithiName']}</span></div>
+                  <div class="krow"><span class="kmuted">Nakṣatra</span><span>{NAKSHATRAS[pm_pan['nakIdx']]}</span></div>
+                  <div class="krow"><span class="kmuted">Yoga</span><span>{YOGAS[pm_pan['yogaIdx']]}</span></div>
+                  <div class="krow"><span class="kmuted">Karaṇa</span><span>{pm_pan['karana']}</span></div>
+                  <div class="krow"><span class="kmuted">Sunrise</span><span>{_fmt_hm(pmw['sunrise'])}</span></div>
+                  <div class="krow"><span class="kmuted">Sunset</span><span>{_fmt_hm(pmw['sunset'])}</span></div>
+                  <div class="krow"><span class="ksindoor">Abhijit Muhūrta</span><span class="ksindoor">{_fmt_hm(pmw['abhijit'][0])} – {_fmt_hm(pmw['abhijit'][1])}</span></div>
+                  <div class="krow"><span class="kmuted">Rāhu Kālam (avoid)</span><span>{_fmt_hm(pmw['rahu_kalam'][0])} – {_fmt_hm(pmw['rahu_kalam'][1])}</span></div>
+                  <div class="krow"><span class="kmuted">Yamaganda (avoid)</span><span>{_fmt_hm(pmw['yamaganda'][0])} – {_fmt_hm(pmw['yamaganda'][1])}</span></div>
+                  <div class="krow"><span class="kmuted">Gulika Kālam (avoid)</span><span>{_fmt_hm(pmw['gulika_kalam'][0])} – {_fmt_hm(pmw['gulika_kalam'][1])}</span></div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.caption(f"Calculated for {form['city'][0]} ({form['city'][1]}).")
+
+        else:
+            st.markdown('<p class="kmuted" style="margin-bottom:6px;">What are you planning?</p>', unsafe_allow_html=True)
+            activity = st.selectbox(
+                "Activity", list(MUHURTA_ACTIVITIES.keys()), key="muhurta_activity",
+                label_visibility="collapsed",
+            )
+            mcol1, mcol2 = st.columns(2)
+            with mcol1:
+                search_from = st.date_input("Search from", value=date.today(), key="muhurta_from")
+            with mcol2:
+                range_days = st.number_input(
+                    "Range (days)", min_value=7, max_value=180, value=45, step=1, key="muhurta_range"
+                )
+            exclude_overlap = st.checkbox(
+                "Exclude Rāhu, Gulika and Yamaganda overlap with Abhijit", value=True, key="muhurta_exclude"
+            )
+            if st.button("🔍 Find calculated windows", use_container_width=True, key="muhurta_search"):
+                found = find_muhurta_windows(
+                    activity, search_from, int(range_days), lat, lon, tz,
+                    exclude_kalam_overlap=exclude_overlap,
+                )
+                st.session_state["muhurta_results"] = found
+
+            results = st.session_state.get("muhurta_results")
+            if results is not None:
+                if not results:
+                    st.warning("No windows scored 50% or higher in this range — try widening the range or picking a different activity.")
+                else:
+                    st.markdown(
+                        f'<p class="ksindoor" style="font-weight:700;margin:14px 0 10px;">'
+                        f'{len(results)} Panchāṅga-screened window(s) found</p>',
+                        unsafe_allow_html=True,
+                    )
+                    for i, r in enumerate(results, 1):
+                        pct = int(round(r["score"] * 100))
+                        d = r["date"]
+                        st.markdown(
+                            f"""
+                            <div class="kcard" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                              <div>
+                                <p class="kmuted" style="font-size:12px;margin:0 0 2px;">
+                                  {d.strftime('%A, %d %B %Y')} &middot; {NAKSHATRAS[r['nak_idx']]}</p>
+                                <p style="font-size:20px;font-weight:700;margin:0 0 4px;">
+                                  {_fmt_hm(r['abhijit'][0])} – {_fmt_hm(r['abhijit'][1])}</p>
+                                <p class="kmuted" style="font-size:13px;margin:0;">
+                                  {r['paksha']} {r['tithi_name']} &middot; {YOGAS[r['yoga_idx']]} &middot;
+                                  screened outside Rāhu, Gulika and Yamaganda</p>
+                              </div>
+                              <div style="text-align:center;flex-shrink:0;margin-left:16px;">
+                                <div style="width:56px;height:56px;border-radius:50%;background:{C['panelSoft']};
+                                  border:2px solid {C['gold']};display:flex;align-items:center;justify-content:center;
+                                  font-size:20px;color:{C['gold']};">&#10003;</div>
+                                <p class="kmuted" style="font-size:11px;margin:4px 0 0;">{pct}% rules</p>
+                              </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+            st.caption(
+                "⚠️ General traditional guidance (favourable weekday, nakṣatra, and avoiding rikta tithi / "
+                "Rāhu-Gulika-Yamaganda overlap for the midday Abhijit window) — not a substitute for a full "
+                "professional muhūrta consultation, which also weighs the lagna at the exact moment, planetary "
+                "strength, and doṣas beyond what's checked here."
+            )
+
+    with tab_compat:
+        st.markdown(
+            '<p class="kmuted" style="margin-bottom:14px;">Checks Moon (nakṣatra tara + sign-lord friendship), '
+            'Ascendant (lord friendship + house relationship), and Jupiter (dignity + cross-placement to the '
+            'partner\'s Moon) between two birth charts.</p>',
+            unsafe_allow_html=True,
+        )
+        cp_a, cp_b = st.columns(2)
+        with cp_a:
+            st.markdown(f'<p style="color:{C["gold"]};font-weight:700;">PERSON A</p>', unsafe_allow_html=True)
+            a_name = st.text_input("Name", value="Person A", key="compat_a_name")
+            a_dob = st.date_input("Date of birth", value=date(1995, 6, 12), key="compat_a_dob",
+                                   min_value=date(1900, 1, 1), max_value=date(2100, 12, 31))
+            a_h, a_m = st.columns(2)
+            with a_h:
+                a_hour = st.number_input("Hour", min_value=0, max_value=23, value=10, key="compat_a_hour")
+            with a_m:
+                a_min = st.number_input("Minute", min_value=0, max_value=59, value=30, key="compat_a_min")
+            a_city_query = st.text_input("Birth place", value="Bathinda", key="compat_a_city")
+            a_matches = [c for c in CITIES if a_city_query.lower() in (c[0] + " " + c[1]).lower()] or CITIES[:5]
+            a_city_label = st.selectbox("Match", [f"{c[0]} · {c[1]}" for c in a_matches[:5]], key="compat_a_city_sel")
+            a_city = a_matches[[f"{c[0]} · {c[1]}" for c in a_matches[:5]].index(a_city_label)]
+
+        with cp_b:
+            st.markdown(f'<p style="color:{C["sindoor"]};font-weight:700;">PERSON B</p>', unsafe_allow_html=True)
+            b_name = st.text_input("Name", value="Person B", key="compat_b_name")
+            b_dob = st.date_input("Date of birth", value=date(1994, 3, 20), key="compat_b_dob",
+                                   min_value=date(1900, 1, 1), max_value=date(2100, 12, 31))
+            b_h, b_m = st.columns(2)
+            with b_h:
+                b_hour = st.number_input("Hour", min_value=0, max_value=23, value=14, key="compat_b_hour")
+            with b_m:
+                b_min = st.number_input("Minute", min_value=0, max_value=59, value=15, key="compat_b_min")
+            b_city_query = st.text_input("Birth place", value="Bathinda", key="compat_b_city")
+            b_matches = [c for c in CITIES if b_city_query.lower() in (c[0] + " " + c[1]).lower()] or CITIES[:5]
+            b_city_label = st.selectbox("Match", [f"{c[0]} · {c[1]}" for c in b_matches[:5]], key="compat_b_city_sel")
+            b_city = b_matches[[f"{c[0]} · {c[1]}" for c in b_matches[:5]].index(b_city_label)]
+
+        if st.button("💞 Calculate compatibility", use_container_width=True, key="compat_calc_btn"):
+            chart_a = compute_chart(a_dob.year, a_dob.month, a_dob.day, int(a_hour), int(a_min),
+                                     a_city[2], a_city[3], a_city[4])
+            chart_b = compute_chart(b_dob.year, b_dob.month, b_dob.day, int(b_hour), int(b_min),
+                                     b_city[2], b_city[3], b_city[4])
+            st.session_state["compat_result"] = compute_compatibility(chart_a, chart_b)
+            st.session_state["compat_names"] = (a_name or "Person A", b_name or "Person B")
+
+        result = st.session_state.get("compat_result")
+        if result:
+            n_a, n_b = st.session_state.get("compat_names", ("Person A", "Person B"))
+            st.markdown(
+                f"""
+                <div class="kcard" style="text-align:center;margin-top:16px;border:2px solid {C['gold']};">
+                  <p style="font-size:15px;color:{C['muted']};margin:0;">{n_a} &#10084; {n_b}</p>
+                  <p style="font-size:42px;font-weight:700;color:{C['gold']};margin:6px 0;">
+                    {result['total']:.1f} <span style="font-size:20px;color:{C['muted']};">/ {result['max_total']:.0f}</span></p>
+                  <p style="font-size:16px;font-weight:700;color:{C['sindoor']};margin:0;">{result['verdict']}</p>
+                  <p class="kmuted" style="font-size:13px;margin-top:4px;">{result['pct']:.0f}% overall</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            rows_html = "".join(
+                f'<tr><td>{label}</td><td>{detail}</td>'
+                f'<td style="text-align:right;font-weight:700;">{score:.2f} / {maxs:.0f}</td></tr>'
+                for label, score, maxs, detail in result["components"]
+            )
+            st.markdown(
+                f'<table class="gtable" style="margin-top:14px;">'
+                f'<tr><th>Factor</th><th>Detail</th><th style="text-align:right;">Score</th></tr>'
+                f'{rows_html}</table>',
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "⚠️ This checks a focused subset — Moon, Ascendant, and Jupiter only — not the full classical "
+                "Aṣṭakoota Guṇa Milan (which scores eight factors — Varna, Vashya, Tara, Yoni, Graha Maitri, "
+                "Gaṇa, Bhakoot, Nāḍī — out of 36). Treat this as a partial, general indicator, not a complete "
+                "traditional match report; a full consultation weighs considerably more than what's checked here."
+            )
+
 else:
     st.markdown(
         '<h4>⭐ Go Premium — Get Your Kundali Report</h4>'
