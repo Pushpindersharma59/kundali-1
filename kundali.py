@@ -1629,166 +1629,178 @@ def seed_premium_demo_account():
 seed_premium_demo_account()
 
 
-def _solid_sphere_svg(parts, defs, grad_id, cx, cy, r, base_hex, highlight_hex, label=""):
-    """Appends a 'solid' glossy sphere (radial-gradient shaded circle, like a
-    tiny 3D planet) plus an optional 2-letter label to parts/defs — pure
-    SVG/CSS, no external images, so it always renders identically everywhere."""
-    defs.append(
-        f'<radialGradient id="{grad_id}" cx="35%" cy="30%" r="75%">'
-        f'<stop offset="0%" stop-color="{highlight_hex}"/>'
-        f'<stop offset="55%" stop-color="{base_hex}"/>'
-        f'<stop offset="100%" stop-color="{base_hex}" stop-opacity="0.85"/>'
-        f'</radialGradient>'
+def render_planetspath_hero():
+    """Decorative-only cosmic scene (stars, orbits, sun, all 9 grahas, Om
+    medallion, feature grid, trust bar, leaf botanicals) — ported from a
+    provided standalone HTML/CSS poster design, rendered inline via
+    st.markdown (NOT components.html/iframe) so it shares the page's DOM
+    with the real Streamlit login widgets rendered right after it. A plain
+    components.html() iframe was the original poster's delivery mechanism,
+    but iframes can't send data back to Python — a "Sign In" button inside
+    one would just be decoration, not a working login. Keeping this as
+    markdown-injected HTML means the visuals are exactly as designed while
+    the actual form (built right after, with real st.text_input etc.)
+    still works."""
+    st.markdown(
+        """
+        <style>
+        @keyframes pp-twinkle { 0%,100% {opacity:.35;transform:scale(.8);} 50% {opacity:1;transform:scale(1.25);} }
+        .pp-star { position:absolute; color:#e9ad28; font-size:18px; opacity:.7; animation:pp-twinkle 3s infinite ease-in-out; }
+        .pp-hero-wrap { position:relative; min-height:560px; overflow:hidden; border-radius:22px;
+            background: radial-gradient(circle at 78% 42%, rgba(255,214,91,.13), transparent 24%),
+                        linear-gradient(180deg,#ffffff 0%,#fffdf8 55%,#fffaf0 100%);
+            margin-bottom:22px; }
+        .pp-cosmos { position:absolute; right:0; top:0; width:100%; height:100%; overflow:hidden; }
+        .pp-orbit { position:absolute; border:1px solid rgba(218,164,43,.34); border-radius:50%; transform:rotate(-9deg); }
+        .pp-o1 { width:530px; height:265px; right:2%; top:72px; }
+        .pp-o2 { width:690px; height:345px; right:-5%; top:37px; }
+        .pp-o3 { width:830px; height:415px; right:-11%; top:0; }
+        .pp-o4 { width:970px; height:485px; right:-18%; top:-40px; }
+        .pp-o5 { width:1120px; height:560px; right:-25%; top:-78px; }
+        .pp-sun { position:absolute; width:126px; height:126px; right:10%; top:195px; border-radius:50%;
+            background: radial-gradient(circle at 37% 32%,#fffbd5 0%,#ffe75c 17%,#ffc52c 42%,#ff9e0d 75%,#ee7b00 100%);
+            box-shadow: 0 0 25px #ffd85c, 0 0 60px rgba(255,192,30,.65), 0 0 100px rgba(255,192,30,.25); z-index:8; }
+        .pp-planet { position:absolute; border-radius:50%; z-index:15;
+            box-shadow: inset -12px -12px 20px rgba(0,0,0,.25), 5px 7px 15px rgba(0,0,0,.18); }
+        .pp-planet-label { position:absolute; background:rgba(255,255,255,.93); border-radius:15px; padding:6px 11px;
+            font-family:Arial,sans-serif; font-size:12px; color:#4d463c; white-space:nowrap;
+            box-shadow:0 2px 7px rgba(0,0,0,.07); border:1px solid #eee5d3; }
+        .pp-planet-label:before { content:"•"; color:#d58c15; margin-right:5px; }
+        .pp-jupiter { width:76px; height:76px; right:45%; top:50px;
+            background: repeating-linear-gradient(12deg,#a56825 0px,#e8c481 8px,#bb7d31 15px,#f1d59a 21px,#98601f 29px); }
+        .pp-jupiter .pp-planet-label { right:-84px; top:27px; }
+        .pp-mars { width:52px; height:52px; right:57%; top:142px;
+            background: radial-gradient(circle at 35% 28%,#f16a39,#bd3e1f 55%,#6e2116); }
+        .pp-mars .pp-planet-label { right:-92px; top:9px; }
+        .pp-mercury { width:49px; height:49px; right:37%; top:228px;
+            background: radial-gradient(circle at 33% 25%,#c5beb1,#79746d 55%,#3e3a37); }
+        .pp-mercury .pp-planet-label { right:-103px; top:9px; }
+        .pp-venus { width:63px; height:63px; right:53%; top:313px;
+            background: repeating-linear-gradient(-12deg,#a87022 0,#f0ce79 9px,#c98c2e 16px,#f7df9d 23px); }
+        .pp-venus .pp-planet-label { right:-79px; top:19px; }
+        .pp-saturn { width:73px; height:73px; right:26%; top:346px;
+            background: repeating-linear-gradient(8deg,#80653c 0,#d8bb7a 10px,#a47c42 18px,#ead4a1 28px); }
+        .pp-saturn-ring { position:absolute; width:145px; height:39px; border:7px solid rgba(126,102,69,.55);
+            border-top-color:rgba(190,160,103,.65); border-bottom-color:rgba(226,200,147,.7); border-radius:50%;
+            left:-36px; top:18px; transform:rotate(13deg); z-index:-1; }
+        .pp-saturn .pp-planet-label { right:-93px; top:21px; }
+        .pp-moon { width:49px; height:49px; right:6%; top:62px;
+            background: radial-gradient(circle at 30% 28%,#efefef,#a8a8a8 55%,#5d5d5d); }
+        .pp-moon .pp-planet-label { right:-91px; top:8px; }
+        .pp-rahu { width:56px; height:56px; right:63%; top:405px;
+            background: radial-gradient(circle at 35% 30%,#727477,#292b30 60%,#101216); }
+        .pp-rahu .pp-planet-label { right:-83px; top:15px; }
+        .pp-ketu { width:49px; height:49px; right:2%; top:445px;
+            background: radial-gradient(circle at 33% 27%,#bd8057,#6f3c2c 65%,#352019); }
+        .pp-ketu .pp-planet-label { right:-83px; top:9px; }
+        .pp-om-container { position:absolute; left:6%; top:60px; width:265px; height:265px;
+            display:flex; align-items:center; justify-content:center; z-index:7; }
+        .pp-om-ring { position:absolute; width:250px; height:250px; border-radius:50%;
+            border:1px solid rgba(215,159,35,.45);
+            box-shadow: 0 0 25px rgba(231,177,54,.13), inset 0 0 25px rgba(231,177,54,.08); }
+        .pp-om-ring:before, .pp-om-ring:after { content:"✦"; position:absolute; color:#dfa72f; font-size:18px; }
+        .pp-om-ring:before { left:50%; top:-11px; }
+        .pp-om-ring:after { left:50%; bottom:-11px; }
+        .pp-om { font-family:"Noto Serif Devanagari","Devanagari MT",Georgia,serif; font-size:145px; line-height:1;
+            color:#e1a20d; text-shadow:2px 3px 0 #b97900, 0 0 20px rgba(240,183,35,.35); z-index:5; }
+        .pp-features { background:rgba(255,255,255,.93); border:1px solid #eadfca; border-radius:22px;
+            box-shadow: 0 12px 30px rgba(104,82,40,.09), 0 2px 7px rgba(104,82,40,.04);
+            overflow:hidden; margin-bottom:18px; }
+        .pp-feature-row { display:grid; grid-template-columns:repeat(4,1fr); }
+        .pp-feature { display:flex; align-items:center; padding:16px 22px; border-right:1px solid #eee9df;
+            border-bottom:1px solid #eee9df; }
+        .pp-feature:nth-child(4n) { border-right:0; }
+        .pp-feature-icon { width:58px; height:58px; border:1px solid #e8bd65; border-radius:50%;
+            display:flex; align-items:center; justify-content:center; font-size:25px; color:#d28c16;
+            margin-right:13px; flex-shrink:0; background:linear-gradient(145deg,#fff,#fffaf0);
+            box-shadow:0 3px 9px rgba(201,143,37,.10); }
+        .pp-feature-title { color:#1b3158; font-weight:bold; font-size:15px; margin-bottom:5px; }
+        .pp-feature-text { font-family:Arial,sans-serif; color:#59657a; font-size:12px; line-height:1.4; }
+        .pp-feature-arrow { color:#d28b16; font-size:23px; margin-left:8px; }
+        .pp-trust { text-align:center; border:1px solid #e5dccb; background:rgba(255,255,255,.84);
+            border-radius:25px; padding:10px 28px; font-size:13px; color:#233a60; margin:0 auto 20px;
+            max-width:560px; }
+        .pp-trust span { margin:0 13px; color:#cf8b17; }
+        .pp-leaf { position:absolute; bottom:-10px; width:90px; height:190px; opacity:.4; z-index:1; }
+        .pp-leaf.left { left:-25px; transform:rotate(-12deg); }
+        .pp-leaf.right { right:-25px; transform:scaleX(-1) rotate(-12deg); }
+        .pp-leaf i { position:absolute; width:35px; height:17px; border-radius:100% 0 100% 0;
+            background:#789b52; transform-origin:right bottom; }
+        .pp-leaf i:nth-child(1){left:18px;bottom:10px;transform:rotate(-55deg);}
+        .pp-leaf i:nth-child(2){left:29px;bottom:42px;transform:rotate(-35deg);}
+        .pp-leaf i:nth-child(3){left:36px;bottom:76px;transform:rotate(-55deg);}
+        .pp-leaf i:nth-child(4){left:47px;bottom:110px;transform:rotate(-30deg);}
+        @media(max-width:900px) { .pp-cosmos { display:none; } }
+        </style>
+
+        <div class="pp-hero-wrap">
+          <div class="pp-star" style="left:3%;top:10%;">✦</div>
+          <div class="pp-star" style="left:31%;top:6%;">✧</div>
+          <div class="pp-star" style="right:7%;top:8%;">✦</div>
+          <div class="pp-star" style="right:18%;top:2%;">✧</div>
+          <div class="pp-leaf left"><i></i><i></i><i></i><i></i></div>
+          <div class="pp-leaf right"><i></i><i></i><i></i><i></i></div>
+          <div class="pp-cosmos">
+            <div class="pp-orbit pp-o1"></div>
+            <div class="pp-orbit pp-o2"></div>
+            <div class="pp-orbit pp-o3"></div>
+            <div class="pp-orbit pp-o4"></div>
+            <div class="pp-orbit pp-o5"></div>
+            <div class="pp-sun"></div>
+            <div class="pp-planet pp-jupiter"><div class="pp-planet-label">Jupiter</div></div>
+            <div class="pp-planet pp-mars"><div class="pp-planet-label">Mars</div></div>
+            <div class="pp-planet pp-mercury"><div class="pp-planet-label">Mercury</div></div>
+            <div class="pp-planet pp-venus"><div class="pp-planet-label">Venus</div></div>
+            <div class="pp-planet pp-saturn"><div class="pp-saturn-ring"></div><div class="pp-planet-label">Saturn</div></div>
+            <div class="pp-planet pp-moon"><div class="pp-planet-label">Moon</div></div>
+            <div class="pp-planet pp-rahu"><div class="pp-planet-label">Rahu</div></div>
+            <div class="pp-planet pp-ketu"><div class="pp-planet-label">Ketu</div></div>
+            <div class="pp-om-container">
+              <div class="pp-om-ring"></div>
+              <div class="pp-om">\u0950</div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    parts.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{r}" fill="url(#{grad_id})" '
-                 f'stroke="rgba(0,0,0,0.15)" stroke-width="0.6"/>')
-    if label:
-        parts.append(f'<text x="{cx:.1f}" y="{cy:.1f}" text-anchor="middle" dominant-baseline="middle" '
-                      f'font-size="{r*1.05:.1f}" font-weight="700" fill="#ffffff" '
-                      f'font-family="Georgia, serif" opacity="0.97" '
-                      f'style="paint-order:stroke;stroke:rgba(0,0,0,0.25);stroke-width:{r*0.12:.2f}px;">'
-                      f'{label}</text>')
 
 
-# (base, highlight) glossy-sphere colours per graha — same hues as
-# PLANET_TRANSIT_COLORS elsewhere in the app, for a consistent palette.
-_SPHERE_COLORS = {
-    "Su": ("#E67E22", "#FFD98A"), "Mo": ("#7EC8E3", "#F2FBFF"),
-    "Ma": ("#E74C3C", "#FFB3A8"), "Me": ("#2ECC71", "#D6FFE8"),
-    "Jp": ("#D4A017", "#FFF0B0"), "Ve": ("#C2185B", "#FFC4DE"),
-    "Sa": ("#8B5E3C", "#E8CBA8"),
-}
+def render_planetspath_features():
+    """The poster's feature grid + trust bar, ported as static HTML (reuses
+    FEATURE_STRIP, the same 8-item feature list used throughout the app)."""
+    rows_html = ['<div class="pp-features">']
+    for row_start in (0, 4):
+        rows_html.append('<div class="pp-feature-row">')
+        for icon, title, desc in FEATURE_STRIP[row_start:row_start + 4]:
+            rows_html.append(
+                f'<div class="pp-feature">'
+                f'<div class="pp-feature-icon">{icon}</div>'
+                f'<div class="pp-feature-content">'
+                f'<div class="pp-feature-title">{title.upper()}</div>'
+                f'<div class="pp-feature-text">{desc}</div></div>'
+                f'<div class="pp-feature-arrow">\u203a</div></div>'
+            )
+        rows_html.append('</div>')
+    rows_html.append('</div>')
+    st.markdown("".join(rows_html), unsafe_allow_html=True)
+    st.markdown(
+        '<div class="pp-trust">\u2699 Accurate Calculations <span>\u2022</span> '
+        '\u2726 Real Astronomy Data <span>\u2022</span> \u25c8 Trusted Insights</div>',
+        unsafe_allow_html=True,
+    )
 
 
-def build_zodiac_hero_svg(size: int = 460) -> str:
-    """Decorative zodiac wheel for the login page hero — not tied to any chart
-    data, just branding. Zodiac glyphs use the Unicode text-presentation
-    variation selector (U+FE0E) to avoid rendering as colourful emoji boxes.
-    The center shows the actual Devanagari Om (ॐ) with a broad font-family
-    fallback list, framed by a lotus-petal ring and sunburst rays. A ring of
-    'solid' glossy planet spheres (pure SVG radial gradients — no external
-    images) orbits just outside the wheel on a thin dashed path, plus small
-    Kundli (diamond-chart) and Nakshatra (star) glyphs for extra flavour."""
-    pad = size * 0.34
-    vb = size + pad * 2
-    cx = cy = vb / 2
-    R_outer = size * 0.44
-    R_mid = size * 0.34
-    R_inner = size * 0.14
-    R_orbit = size * 0.72
-    VS = "\ufe0e"
-    zodiac = [c + VS for c in
-              ["\u2648", "\u2649", "\u264a", "\u264b", "\u264c", "\u264d",
-               "\u264e", "\u264f", "\u2650", "\u2651", "\u2652", "\u2653"]]
-    names = ["ARIES", "TAURUS", "GEMINI", "CANCER", "LEO", "VIRGO", "LIBRA",
-              "SCORPIO", "SAGITTARIUS", "CAPRICORN", "AQUARIUS", "PISCES"]
-    OM_FONTS = ("'Noto Sans Devanagari','Nirmala UI','Kohinoor Devanagari',"
-                "'Devanagari Sangam MN','Mangal',sans-serif")
-
-    def pt(r, deg):
-        rad = math.radians(deg - 90)
-        return cx + r * math.cos(rad), cy + r * math.sin(rad)
-
-    defs = [
-        '<radialGradient id="zodiacGlow" cx="50%" cy="50%" r="60%">'
-        '<stop offset="0%" stop-color="#FFFDF3"/><stop offset="100%" stop-color="#FFF0AE"/>'
-        '</radialGradient>',
-        '<radialGradient id="sunGlow" cx="50%" cy="50%" r="50%">'
-        '<stop offset="0%" stop-color="#FFF6D8" stop-opacity="0.95"/>'
-        '<stop offset="70%" stop-color="#FFE9A8" stop-opacity="0.35"/>'
-        '<stop offset="100%" stop-color="#FFE9A8" stop-opacity="0"/>'
-        '</radialGradient>',
-    ]
-    parts = [f'<svg viewBox="0 0 {vb} {vb}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">']
-
-    # ---- outer orbit path: a soft double ring (solid + dashed) with small
-    # gold sparkles between the planets, well clear of the sign-name labels ----
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_orbit}" fill="none" stroke="#D8A845" '
-                 f'stroke-width="1.4" opacity="0.30"/>')
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_orbit}" fill="none" stroke="#B8842E" '
-                 f'stroke-width="1" stroke-dasharray="2,9" opacity="0.55"/>')
-    orbit_keys = ["Su", "Mo", "Ma", "Me", "Jp", "Ve", "Sa"]
-    n_planets = len(orbit_keys)
-    for i in range(n_planets * 3):
-        if i % 3 == 0:
-            continue  # skip the angles where a planet sphere will sit
-        ang = i * (360 / (n_planets * 3))
-        sx, sy = pt(R_orbit, ang)
-        parts.append(f'<circle cx="{sx:.1f}" cy="{sy:.1f}" r="{size*0.006:.2f}" fill="#D8A845" opacity="0.6"/>')
-    for i, key in enumerate(orbit_keys):
-        ang = i * (360 / n_planets)
-        px, py = pt(R_orbit, ang)
-        base_hex, hi_hex = _SPHERE_COLORS[key]
-        _solid_sphere_svg(parts, defs, f"sph_{key}", px, py, size * 0.044, base_hex, hi_hex, label=key)
-
-    # ---- Kundli (diamond-chart) and Nakshatra (star) decorative glyphs, at
-    # the top and bottom of the orbit ring ----
-    kx, ky = pt(R_orbit, 0)
-    k_r = size * 0.032
-    parts.append(f'<rect x="{kx-k_r:.1f}" y="{ky-k_r-size*0.1:.1f}" width="{k_r*2:.1f}" height="{k_r*2:.1f}" '
-                 f'fill="#FFFDF3" stroke="#B8842E" stroke-width="1.6" '
-                 f'transform="rotate(45 {kx:.1f} {ky-k_r-size*0.1:.1f})"/>')
-    nx2, ny2 = pt(R_orbit, 180)
-    star_pts = []
-    for i in range(10):
-        sang = math.radians(i * 36 - 90)
-        srad = size * (0.034 if i % 2 == 0 else 0.014)
-        star_pts.append(f"{nx2 + srad*math.cos(sang):.1f},{ny2 + size*0.1 + srad*math.sin(sang):.1f}")
-    parts.append(f'<polygon points="{" ".join(star_pts)}" fill="#B8842E" opacity="0.85"/>')
-
-    # ---- main wheel ----
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_outer}" fill="url(#zodiacGlow)" stroke="#B8842E" stroke-width="2.5"/>')
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_mid}" fill="none" stroke="#B8842E" stroke-width="1" opacity="0.55"/>')
-    for i in range(12):
-        boundary = i * 30
-        x1, y1 = pt(R_mid, boundary)
-        x2, y2 = pt(R_outer, boundary)
-        parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
-                      f'stroke="#B8842E" stroke-width="1" opacity="0.5"/>')
-        gx, gy = pt((R_outer + R_mid) / 2 + 4, boundary + 15)
-        parts.append(f'<text x="{gx:.1f}" y="{gy:.1f}" text-anchor="middle" dominant-baseline="middle" '
-                      f'font-size="{size*0.048}" fill="#B8842E">{zodiac[i]}</text>')
-        nx, ny = pt(R_outer + size * 0.05, boundary + 15)
-        parts.append(f'<text x="{nx:.1f}" y="{ny:.1f}" text-anchor="middle" dominant-baseline="middle" '
-                      f'font-size="{size*0.019}" letter-spacing="1" fill="#8a6a35" '
-                      f'font-family="Georgia, serif">{names[i]}</text>')
-    for i in range(60):
-        ang = i * 6
-        x1, y1 = pt(R_mid, ang)
-        x2, y2 = pt(R_mid - size * 0.012, ang)
-        parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#B8842E" '
-                      f'stroke-width="0.7" opacity="0.4"/>')
-
-    # ---- center: sunburst + lotus frame + real Om glyph ----
-    glow_r = R_inner * 2.3
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{glow_r}" fill="url(#sunGlow)"/>')
-    n_rays = 32
-    for i in range(n_rays):
-        ang = i * (360 / n_rays)
-        r1 = R_inner * 1.05
-        r2 = R_inner * (1.9 if i % 2 == 0 else 1.55)
-        x1, y1 = pt(r1, ang)
-        x2, y2 = pt(r2, ang)
-        parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
-                      f'stroke="#D8A845" stroke-width="1.5" opacity="0.7" stroke-linecap="round"/>')
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{R_inner}" fill="#FFFDF3" stroke="#B8842E" stroke-width="2"/>')
-    petal_r_mid = R_inner * 0.85
-    petal_r = R_inner * 0.2
-    for i in range(8):
-        ang = math.radians(i * 45)
-        px2 = cx + petal_r_mid * 0.6 * math.sin(ang)
-        py2 = cy - petal_r_mid * 0.6 * math.cos(ang)
-        parts.append(
-            f'<ellipse cx="{px2:.1f}" cy="{py2:.1f}" rx="{petal_r:.1f}" ry="{petal_r*1.5:.1f}" '
-            f'transform="rotate({i*45} {px2:.1f} {py2:.1f})" fill="none" stroke="#B8842E" '
-            f'stroke-width="1.2" opacity="0.55"/>'
-        )
-    parts.append(f'<text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="central" '
-                 f'font-size="{R_inner*1.15:.1f}" fill="#B8842E" font-family="{OM_FONTS}">\u0950</text>')
-
-    svg_open = parts[0]
-    body = "".join(parts[1:])
-    return svg_open + "<defs>" + "".join(defs) + "</defs>" + body + "</svg>"
+FEATURE_STRIP = [
+    ("\u25c8", "Kundali Analysis", "Detailed insights from your real birth chart"),
+    ("\u2728", "Nakshatra Guide", "27 nakshatras — deities, symbols & meanings"),
+    ("\U0001fa90", "Planetary Transits", "Live planetary movements, updated in real time"),
+    ("\u25c9", "Divisional Charts", "D1 through D60 varga charts, generated instantly"),
+    ("\u25a6", "Navtara Chakra", "Auspicious-day calendar based on your own nakshatra"),
+    ("\u2302", "Graha Maitri & Trikona", "Planetary friendships and house groupings by element"),
+    ("\u2740", "Day-wise Remedies", "Gemstones, colours & practices for each weekday"),
+    ("\u25a3", "PDF Report", "A downloadable, professional Kundali report"),
+]
 
 
 def build_compass_star_svg(size: int = 90) -> str:
@@ -1802,235 +1814,74 @@ def build_compass_star_svg(size: int = 90) -> str:
         pts.append(f"{cx + r*math.cos(ang):.1f},{cy + r*math.sin(ang):.1f}")
     return (
         f'<svg viewBox="0 0 {size} {size}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">'
-        f'<circle cx="{cx}" cy="{cy}" r="{r_out+8}" fill="none" stroke="#B8842E" stroke-width="1.5" opacity="0.6"/>'
-        f'<polygon points="{" ".join(pts)}" fill="none" stroke="#B8842E" stroke-width="2"/>'
-        f'<circle cx="{cx}" cy="{cy}" r="{r_in*0.5}" fill="#B8842E"/>'
+        f'<circle cx="{cx}" cy="{cy}" r="{r_out+8}" fill="none" stroke="#d79a1e" stroke-width="1.5" opacity="0.6"/>'
+        f'<polygon points="{" ".join(pts)}" fill="none" stroke="#d79a1e" stroke-width="2"/>'
+        f'<circle cx="{cx}" cy="{cy}" r="{r_in*0.5}" fill="#d79a1e"/>'
         f'</svg>'
     )
-
-
-def build_om_medallion_svg(size: int = 420) -> str:
-    """A larger, more ornate Om medallion: concentric decorative rings behind
-    the Devanagari Om glyph, standing on its own (no zodiac wheel) — used as
-    the anchor of the new scattered-planets hero layout."""
-    vb = size
-    cx = cy = vb / 2
-    OM_FONTS = ("'Noto Sans Devanagari','Nirmala UI','Kohinoor Devanagari',"
-                "'Devanagari Sangam MN','Mangal',sans-serif")
-    parts = [
-        f'<svg viewBox="0 0 {vb} {vb}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">',
-        '<defs><radialGradient id="omGlow" cx="50%" cy="50%" r="55%">'
-        '<stop offset="0%" stop-color="#FFF6D8" stop-opacity="0.9"/>'
-        '<stop offset="70%" stop-color="#FFE9A8" stop-opacity="0.3"/>'
-        '<stop offset="100%" stop-color="#FFE9A8" stop-opacity="0"/>'
-        '</radialGradient></defs>',
-        f'<circle cx="{cx}" cy="{cy}" r="{size*0.46:.1f}" fill="url(#omGlow)"/>',
-    ]
-    for r_frac, dash, op in [(0.42, "2,10", 0.35), (0.34, None, 0.4), (0.27, "1,6", 0.45)]:
-        r = size * r_frac
-        dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
-        parts.append(f'<circle cx="{cx}" cy="{cy}" r="{r:.1f}" fill="none" stroke="#B8842E" '
-                      f'stroke-width="1"{dash_attr} opacity="{op}"/>')
-    for i in range(24):
-        ang = math.radians(i * 15)
-        r1, r2 = size * 0.34, size * 0.365
-        x1, y1 = cx + r1 * math.cos(ang), cy + r1 * math.sin(ang)
-        x2, y2 = cx + r2 * math.cos(ang), cy + r2 * math.sin(ang)
-        parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
-                      f'stroke="#B8842E" stroke-width="1" opacity="0.4"/>')
-    parts.append(f'<text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="central" '
-                 f'font-size="{size*0.32:.1f}" fill="#B8842E" font-family="{OM_FONTS}">\u0950</text>')
-    parts.append("</svg>")
-    return "".join(parts)
-
-
-_ORBIT_PLANETS = [
-    # key, fx, fy, radius_frac(of height), has_rings
-    ("Jp", 0.40, 0.15, 0.075, False),
-    ("Ma", 0.36, 0.33, 0.050, False),
-    ("Mo", 0.84, 0.10, 0.045, False),
-    ("Me", 0.58, 0.45, 0.045, False),
-    ("Ve", 0.38, 0.60, 0.062, False),
-    ("Sa", 0.62, 0.72, 0.072, True),
-    ("Ra", 0.34, 0.85, 0.050, False),
-    ("Ke", 0.84, 0.86, 0.045, False),
-    ("Su", 0.80, 0.38, 0.10, False),
-]
-_PLANET_FULLNAMES = {
-    "Su": "Sun", "Mo": "Moon", "Ma": "Mars", "Me": "Mercury", "Jp": "Jupiter",
-    "Ve": "Venus", "Sa": "Saturn", "Ra": "Rahu", "Ke": "Ketu",
-}
-_SPHERE_COLORS_EXT = dict(_SPHERE_COLORS)
-_SPHERE_COLORS_EXT["Ra"] = ("#6C5B7B", "#D8CFE0")
-_SPHERE_COLORS_EXT["Ke"] = ("#7A4B2A", "#E6C9A8")
-
-
-def build_orbit_scene_svg(width: int = 1000, height: int = 620) -> str:
-    """Scattered 'solid' glossy planets (pure SVG radial gradients) drifting
-    across a few faint elliptical orbit paths, each with its own small pill
-    label alongside it rather than text crammed onto the sphere — the
-    composition this is modelled on has no visible zodiac wheel, just the
-    planets and orbit paths, so this is a separate scene from
-    build_zodiac_hero_svg rather than a variant of it."""
-    defs = []
-    parts = [f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" style="display:block;">']
-
-    orbit_paths = [
-        (width * 0.66, height * 0.5, width * 0.30, height * 0.42),
-        (width * 0.66, height * 0.5, width * 0.20, height * 0.28),
-        (width * 0.66, height * 0.5, width * 0.09, height * 0.14),
-    ]
-    for ex, ey, rx, ry in orbit_paths:
-        parts.append(f'<ellipse cx="{ex:.1f}" cy="{ey:.1f}" rx="{rx:.1f}" ry="{ry:.1f}" '
-                      f'fill="none" stroke="#D8A845" stroke-width="1" stroke-dasharray="2,8" opacity="0.35"/>')
-
-    for key, fx, fy, r_frac, has_rings in _ORBIT_PLANETS:
-        px, py = width * fx, height * fy
-        r = height * r_frac
-        base_hex, hi_hex = _SPHERE_COLORS_EXT[key]
-        if key == "Su":
-            defs.append(
-                f'<radialGradient id="sunFlare" cx="50%" cy="50%" r="60%">'
-                f'<stop offset="0%" stop-color="#FFF3C4" stop-opacity="0.9"/>'
-                f'<stop offset="60%" stop-color="#FFD98A" stop-opacity="0.25"/>'
-                f'<stop offset="100%" stop-color="#FFD98A" stop-opacity="0"/></radialGradient>'
-            )
-            parts.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="{r*2.1:.1f}" fill="url(#sunFlare)"/>')
-        if has_rings:
-            parts.append(f'<ellipse cx="{px:.1f}" cy="{py:.1f}" rx="{r*1.7:.1f}" ry="{r*0.5:.1f}" '
-                          f'fill="none" stroke="#B8842E" stroke-width="{r*0.12:.1f}" opacity="0.6" '
-                          f'transform="rotate(-18 {px:.1f} {py:.1f})"/>')
-        _solid_sphere_svg(parts, defs, f"orbit_{key}", px, py, r, base_hex, hi_hex)
-        label_x = px + r + 10
-        label_text = _PLANET_FULLNAMES[key]
-        label_w = len(label_text) * 7.2 + 22
-        parts.append(f'<rect x="{label_x:.1f}" y="{py-11:.1f}" width="{label_w:.1f}" height="22" rx="11" '
-                      f'fill="#FFFDF3" stroke="#F0DE94" stroke-width="1" opacity="0.95"/>')
-        parts.append(f'<circle cx="{label_x+12:.1f}" cy="{py:.1f}" r="3" fill="{base_hex}"/>')
-        parts.append(f'<text x="{label_x+22:.1f}" y="{py:.1f}" dominant-baseline="middle" '
-                      f'font-size="13" fill="#3A2E1F" font-family="Georgia, serif">{label_text}</text>')
-
-    svg_open = parts[0]
-    body = "".join(parts[1:])
-    return svg_open + "<defs>" + "".join(defs) + "</defs>" + body + "</svg>"
-
-
-FEATURE_STRIP = [
-    ("\U0001fa90", "Kundali Analysis", "Detailed insights from your real birth chart"),
-    ("\u263e", "Nakshatra Guide", "27 nakshatras — deities, symbols & meanings"),
-    ("\U0001fa90", "Planetary Transits", "Live planetary movements, updated in real time"),
-    ("\u2295", "Divisional Charts", "D1 through D60 varga charts, generated instantly"),
-    ("\U0001f4c5", "Navtara Chakra", "Auspicious-day calendar based on your own nakshatra"),
-    ("\u26a1", "Graha Maitri & Trikona", "Planetary friendships and house groupings by element"),
-    ("\U0001f48e", "Day-wise Remedies", "Gemstones, colours & practices for each weekday"),
-    ("\U0001f4c4", "PDF Report", "A downloadable, professional Kundali report"),
-]
 
 
 def render_auth_screen():
     """Full-page login / signup flow. Returns nothing — sets
     st.session_state['user'] and reruns once authenticated."""
-    NAVY = "#1B3A6B"
-    ORANGE = "#E29A2E"
+    NAVY = "#162b51"
+    GOLD = "#c98b17"
 
     st.markdown(
         f"""
         <style>
         .stApp {{
             background:
-                radial-gradient(circle at 8% 8%, rgba(255,221,150,0.55) 0%, rgba(255,221,150,0) 32%),
-                radial-gradient(1.6px 1.6px at 18% 14%, #ffffff 100%, transparent),
-                radial-gradient(1.6px 1.6px at 62% 7%, #ffffff 100%, transparent),
-                radial-gradient(1.6px 1.6px at 80% 18%, #ffffff 100%, transparent),
-                radial-gradient(1.6px 1.6px at 40% 22%, #ffffff 100%, transparent),
-                linear-gradient(180deg, #f7f9fc 0%, #f9f4e6 55%, #f6ecd2 100%) !important;
+                radial-gradient(circle at 75% 35%, rgba(255,225,140,.22), transparent 28%),
+                radial-gradient(circle at 20% 75%, rgba(255,215,120,.13), transparent 30%),
+                linear-gradient(135deg,#ffffff 0%,#fffdf8 48%,#fff8e9 100%) !important;
             background-attachment: fixed;
         }}
-        .topnav {{
-            display: flex; align-items: center; justify-content: space-between;
-            background: rgba(255,255,255,0.85); border-bottom: 1px solid {C['line']};
-            padding: 10px 26px; margin: -1rem -5rem 28px; border-radius: 0 0 14px 14px;
-            flex-wrap: wrap; gap: 10px;
-        }}
-        .topnav-brand {{ display: flex; align-items: center; gap: 10px; }}
-        .topnav-brand-text {{ font-family: Georgia, serif; }}
-        .topnav-brand-text .p1 {{ color: {NAVY}; font-size: 22px; font-weight: 700; }}
-        .topnav-brand-text .p2 {{ color: {ORANGE}; font-size: 22px; font-weight: 700; }}
-        .topnav-tagline {{ color: {C['muted']}; font-size: 9px; letter-spacing: 0.15em; margin-top: -2px; }}
-        .topnav-links {{ display: flex; gap: 20px; flex-wrap: wrap; }}
-        .topnav-links span {{ color: {NAVY}; font-size: 13.5px; font-weight: 600; white-space: nowrap; }}
-        .topnav-links span.active {{ color: {ORANGE}; border-bottom: 2px solid {ORANGE}; padding-bottom: 4px; }}
-        .topnav-signin {{ border: 1px solid {ORANGE}; color: {ORANGE}; border-radius: 20px;
-            padding: 6px 18px; font-size: 13.5px; font-weight: 700; white-space: nowrap; }}
-        .hero-headline {{ color: {NAVY}; font-family: Georgia, serif; font-size: 32px;
-            font-weight: 700; margin: 4px 0 10px; }}
-        .hero-headline .accent {{ color: {ORANGE}; }}
-        .hero-desc {{ color: {C['muted']}; font-size: 15px; line-height: 1.6; max-width: 420px; margin: 0 0 22px; }}
-        .welcome-back {{ color: {ORANGE}; letter-spacing: 0.1em; font-size: 15px; font-weight: 700;
-            text-align: center; margin: 4px 0 14px; }}
+        .pp-brand-row {{ display:flex; align-items:center; gap:14px; margin-bottom:6px; }}
+        .pp-brand-name {{ color:#714d14; font-size:31px; font-weight:bold; letter-spacing:-1px;
+            font-family:Georgia,serif; white-space:nowrap; }}
+        .pp-tagline {{ font-family:Arial,sans-serif; font-size:10px; letter-spacing:4px; color:#52617a; margin-top:2px; }}
+        .hero-headline {{ color:{NAVY}; font-family:Georgia,serif; font-size:35px; line-height:1.18;
+            margin:18px 0 12px; }}
+        .hero-headline .accent {{ color:{GOLD}; }}
+        .hero-desc {{ font-family:Arial,sans-serif; color:#59647a; font-size:15px; line-height:1.65;
+            max-width:430px; margin-bottom:21px; }}
+        .welcome-back {{ text-align:center; font-size:21px; color:#bd7e13; font-family:Georgia,serif;
+            margin:4px 0 14px; }}
+        .welcome-back:before, .welcome-back:after {{ content:"\u2727"; margin:0 14px; color:#e1a63a; }}
         div[data-testid="stTabs"] {{
-            background: rgba(255,255,255,0.92); border: 1px solid {C['line']}; border-radius: 16px;
-            padding: 10px 26px 22px; box-shadow: 0 10px 30px rgba(27,58,107,0.12); max-width: 440px;
+            background: rgba(255,255,255,.92); border:1px solid #eee0c6; border-radius:22px;
+            padding:16px 25px 22px;
+            box-shadow: 0 15px 35px rgba(117,88,28,.10), 0 3px 8px rgba(117,88,28,.05);
+            max-width:410px;
         }}
-        div[data-testid="stTabs"] button[role="tab"] {{ font-weight: 700; letter-spacing: 0.04em; color: {NAVY}; }}
+        div[data-testid="stTabs"] button[role="tab"] {{ font-weight:700; letter-spacing:0.03em; color:#697083; }}
+        div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{ color:{GOLD}; }}
         div[data-testid="stTabs"] .stButton button {{
-            background: linear-gradient(90deg, {ORANGE}, #F0B94A) !important; color: #fff !important;
-            border: none !important; font-weight: 700; letter-spacing: 0.05em; border-radius: 10px !important;
+            background: linear-gradient(90deg,#f5c85d,#dd9014) !important; color:#fff !important;
+            border:none !important; font-family:Georgia,serif; font-size:17px; font-weight:700;
+            border-radius:8px !important; box-shadow:0 4px 10px rgba(210,145,29,.2);
         }}
-        .feature-strip {{
-            background: rgba(255,255,255,0.94); border: 1px solid {C['line']}; border-radius: 18px;
-            padding: 22px 26px; margin-top: 30px; box-shadow: 0 4px 16px rgba(27,58,107,0.08);
-        }}
-        .feature-item {{ display: flex; align-items: flex-start; gap: 14px; padding: 14px 10px; }}
-        .feature-icon-badge {{
-            flex-shrink: 0; width: 46px; height: 46px; border-radius: 50%;
-            background: {C['panelSoft']}; border: 1px solid {C['line']};
-            display: flex; align-items: center; justify-content: center; font-size: 20px;
-        }}
-        .feature-title {{ color: {NAVY}; font-weight: 700; font-size: 14px; letter-spacing: 0.02em;
-            text-transform: uppercase; margin-bottom: 3px; }}
-        .feature-desc {{ color: {C['muted']}; font-size: 12.5px; line-height: 1.4; }}
-        .trust-badge {{
-            text-align: center; margin: 18px auto 0; max-width: 620px; padding: 10px 20px;
-            border: 1px solid {C['line']}; border-radius: 24px; background: rgba(255,255,255,0.7);
-            color: {C['muted']}; font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
-        }}
-        .trust-badge span {{ color: {NAVY}; }}
+        .pp-forgot {{ text-align:center; color:#47526a; font-family:Arial,sans-serif; font-size:13px;
+            padding-top:10px; }}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # ---- Top navigation bar (decorative outside the feature grid it points
-    # to — the real functionality lives behind sign-in, one page at a time) ----
-    st.markdown(
-        f"""
-        <div class="topnav">
-            <div class="topnav-brand">
-                <div style="max-width:38px;">{build_compass_star_svg(38)}</div>
-                <div class="topnav-brand-text">
-                    <div><span class="p1">Planets</span><span class="p2">Path</span></div>
-                    <div class="topnav-tagline">DISCOVER &middot; REFLECT &middot; GROW</div>
-                </div>
-            </div>
-            <div class="topnav-links">
-                <span class="active">Home</span>
-                <span>Kundali Analysis</span>
-                <span>Nakshatra Guide</span>
-                <span>Planetary Transits</span>
-                <span>Divisional Charts</span>
-                <span>Remedies</span>
-                <span>Reports</span>
-            </div>
-            <div class="topnav-signin">Sign In</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    render_planetspath_hero()
 
-    hero_l, hero_r = st.columns([1, 1.3])
+    hero_l, hero_r = st.columns([1, 1.15])
 
     with hero_l:
+        st.markdown(
+            f'<div class="pp-brand-row">'
+            f'<div style="max-width:56px;">{build_compass_star_svg(56)}</div>'
+            f'<div><div class="pp-brand-name">PlanetsPath</div>'
+            f'<div class="pp-tagline">DISCOVER &nbsp;\u2022&nbsp; REFLECT &nbsp;\u2022&nbsp; GROW</div></div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
         st.markdown(
             '<p class="hero-headline">Your <span class="accent">Birth</span> Chart Awaits</p>',
             unsafe_allow_html=True,
@@ -2040,7 +1891,7 @@ def render_auth_screen():
             'planetary transits, and more — every calculation powered by real astronomy.</p>',
             unsafe_allow_html=True,
         )
-        st.markdown('<p class="welcome-back">&#10022; Welcome Back &#10022;</p>', unsafe_allow_html=True)
+        st.markdown('<p class="welcome-back">Welcome Back</p>', unsafe_allow_html=True)
 
         tab_login, tab_signup = st.tabs(["SIGN IN", "NEW SIGN UP"])
 
@@ -2048,7 +1899,7 @@ def render_auth_screen():
             identifier = st.text_input("Username", key="login_identifier", placeholder="User Name")
             password = st.text_input("Password", type="password", key="login_password", placeholder="Password")
             remember_me = st.checkbox("Remember me", value=True, key="login_remember_me")
-            if st.button("Sign In  →", use_container_width=True, key="signin_btn"):
+            if st.button("Sign In  \u2192", use_container_width=True, key="signin_btn"):
                 if not identifier or not password:
                     st.error("Enter your username and password.")
                 else:
@@ -2061,6 +1912,7 @@ def render_auth_screen():
                         st.rerun()
                     else:
                         st.error(msg)
+            st.markdown('<p class="pp-forgot">Forgot Password?</p>', unsafe_allow_html=True)
 
         with tab_signup:
             su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
@@ -2089,36 +1941,8 @@ def render_auth_screen():
                     else:
                         st.success("Account created — you can sign in now.")
 
-    with hero_r:
-        om_svg = build_om_medallion_svg(320)
-        orbit_svg = build_orbit_scene_svg(1000, 620)
-        st.markdown(
-            f"""
-            <div style="position:relative; max-width:640px; margin:0 auto;">
-                <div style="position:absolute; left:0; top:8%; width:32%;">{om_svg}</div>
-                <div>{orbit_svg}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    render_planetspath_features()
 
-    feature_html = ['<div class="feature-strip"><div style="display:grid;'
-                     'grid-template-columns:repeat(4,1fr);gap:4px;">']
-    for icon, title, desc in FEATURE_STRIP:
-        feature_html.append(
-            f'<div class="feature-item">'
-            f'<div class="feature-icon-badge">{icon}</div>'
-            f'<div><div class="feature-title">{title}</div>'
-            f'<div class="feature-desc">{desc}</div></div></div>'
-        )
-    feature_html.append("</div></div>")
-    st.markdown("".join(feature_html), unsafe_allow_html=True)
-
-    st.markdown(
-        '<div class="trust-badge"><span>&#128737; Accurate Calculations</span> &middot; '
-        '<span>Real Astronomy Data</span> &middot; <span>Trusted Insights</span></div>',
-        unsafe_allow_html=True,
-    )
 
 # ============================================================
 # PREMIUM: Kundali report generation (PDF, with HTML fallback)
