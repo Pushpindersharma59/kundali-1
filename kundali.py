@@ -1815,6 +1815,7 @@ def render_auth_screen():
                 linear-gradient(135deg,#ffffff 0%,#fffdf8 48%,#fff8e9 100%) !important;
             background-attachment: fixed;
         }}
+        .block-container {{ padding-top: 1rem !important; }}
         .pp-header {{ display:flex; align-items:center; gap:16px; padding:10px 4px 14px;
             border-bottom:1px solid #eee6d7; margin-bottom:16px; }}
         .pp-brand-name {{ color:#714d14; font-size:52px; font-weight:bold; letter-spacing:-1px;
