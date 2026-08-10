@@ -1266,6 +1266,35 @@ def init_db():
         )
     """)
 
+    # ---- Saved chart library: unlike "profiles" (one saved birth-detail set
+    # per account, used to prefill the form), this holds any number of named
+    # charts per user — e.g. family members or repeat clients — that can be
+    # reloaded into the form at any time.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS saved_charts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            name TEXT, dob TEXT NOT NULL, tob TEXT NOT NULL,
+            city_name TEXT, city_region TEXT, lat REAL, lon REAL, tz REAL,
+            created_at REAL NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    """)
+
+    # ---- "Remember Me" tokens: only the SHA-256 hash is stored, never the raw
+    # token (same principle as password storage) — the raw token only ever
+    # lives in the user's browser URL, generated fresh on each sign-in.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS remember_tokens (
+            token_hash TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            expires_at REAL NOT NULL,
+            created_at REAL NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -1461,6 +1490,104 @@ def save_profile(user_id: int, name, dob_iso, tob_iso, city_name, city_region, l
         """,
         (user_id, name, dob_iso, tob_iso, city_name, city_region, lat, lon, tz, time.time()),
     )
+    conn.commit()
+    conn.close()
+
+
+def save_chart_to_library(user_id: int, label: str, name: str, dob_iso: str, tob_iso: str,
+                           city_name: str, city_region: str, lat: float, lon: float, tz: float) -> int:
+    """Adds a new entry to the user's chart library (unlike save_profile, this
+    never overwrites — every save creates a new row, so multiple charts can
+    be kept side by side). Returns the new row's id."""
+    conn = get_conn()
+    cur = conn.execute(
+        """
+        INSERT INTO saved_charts (user_id, label, name, dob, tob, city_name, city_region, lat, lon, tz, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (user_id, label, name, dob_iso, tob_iso, city_name, city_region, lat, lon, tz, time.time()),
+    )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return new_id
+
+
+def list_saved_charts(user_id: int):
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM saved_charts WHERE user_id=? ORDER BY created_at DESC", (user_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_saved_chart(chart_id: int, user_id: int):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM saved_charts WHERE id=? AND user_id=?", (chart_id, user_id)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def delete_saved_chart(chart_id: int, user_id: int):
+    conn = get_conn()
+    conn.execute("DELETE FROM saved_charts WHERE id=? AND user_id=?", (chart_id, user_id))
+    conn.commit()
+    conn.close()
+
+
+REMEMBER_ME_DAYS = 30
+
+
+def _hash_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def create_remember_token(user_id: int) -> str:
+    """Generates a fresh high-entropy token, stores only its hash (with a 30-day
+    expiry), and returns the raw token — the raw value is meant to go straight
+    into the browser's URL via st.query_params and never be stored server-side."""
+    raw_token = secrets.token_urlsafe(32)
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO remember_tokens (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+        (_hash_token(raw_token), user_id, time.time() + REMEMBER_ME_DAYS * 86400, time.time()),
+    )
+    conn.commit()
+    conn.close()
+    return raw_token
+
+
+def validate_remember_token(raw_token: str):
+    """Returns the user dict if the token is valid and unexpired, else None.
+    Expired tokens are opportunistically cleaned up here too."""
+    if not raw_token:
+        return None
+    conn = get_conn()
+    token_hash = _hash_token(raw_token)
+    row = conn.execute(
+        "SELECT user_id, expires_at FROM remember_tokens WHERE token_hash=?", (token_hash,)
+    ).fetchone()
+    if row is None:
+        conn.close()
+        return None
+    if row["expires_at"] < time.time():
+        conn.execute("DELETE FROM remember_tokens WHERE token_hash=?", (token_hash,))
+        conn.commit()
+        conn.close()
+        return None
+    user_row = conn.execute("SELECT * FROM users WHERE id=?", (row["user_id"],)).fetchone()
+    conn.close()
+    return dict(user_row) if user_row else None
+
+
+def revoke_remember_token(raw_token: str):
+    if not raw_token:
+        return
+    conn = get_conn()
+    conn.execute("DELETE FROM remember_tokens WHERE token_hash=?", (_hash_token(raw_token),))
     conn.commit()
     conn.close()
 
@@ -1920,6 +2047,7 @@ def render_auth_screen():
         with tab_login:
             identifier = st.text_input("Username", key="login_identifier", placeholder="User Name")
             password = st.text_input("Password", type="password", key="login_password", placeholder="Password")
+            remember_me = st.checkbox("Remember me", value=True, key="login_remember_me")
             if st.button("Sign In  →", use_container_width=True, key="signin_btn"):
                 if not identifier or not password:
                     st.error("Enter your username and password.")
@@ -1927,6 +2055,9 @@ def render_auth_screen():
                     user, msg = authenticate(identifier.strip(), password)
                     if user:
                         st.session_state["user"] = {"id": user["id"], "username": user["username"]}
+                        if remember_me:
+                            raw_token = create_remember_token(user["id"])
+                            st.query_params["rt"] = raw_token
                         st.rerun()
                     else:
                         st.error(msg)
@@ -3684,6 +3815,18 @@ if "user" not in st.session_state and st.query_params.get("preview") == "1":
         st.session_state["user"] = {"id": demo_user["id"], "username": demo_user["username"]}
         st.rerun()
 
+# "Remember me": a valid, unexpired token in the URL (?rt=...) signs the
+# person straight back in without re-entering credentials, for up to
+# REMEMBER_ME_DAYS after they last checked the box — this is what lets
+# sign-in survive closing the browser entirely, not just staying on the tab.
+if "user" not in st.session_state:
+    rt = st.query_params.get("rt")
+    if rt:
+        rt_user = validate_remember_token(rt)
+        if rt_user:
+            st.session_state["user"] = {"id": rt_user["id"], "username": rt_user["username"]}
+            st.rerun()
+
 if "user" not in st.session_state:
     render_auth_screen()
     st.stop()
@@ -3704,9 +3847,44 @@ with topbar_r:
     premium_badge = " · ⭐ Premium" if is_premium(st.session_state["user"]["id"]) else ""
     st.markdown(f'<p class="kmuted" style="text-align:right;">Signed in as <b>{st.session_state["user"]["username"]}</b>{premium_badge}</p>', unsafe_allow_html=True)
     if st.button("Log out", use_container_width=True):
+        rt_to_revoke = st.query_params.get("rt")
+        if rt_to_revoke:
+            revoke_remember_token(rt_to_revoke)
+            st.query_params.pop("rt", None)
         del st.session_state["user"]
         st.session_state.pop("form", None)
         st.rerun()
+
+if is_premium(st.session_state["user"]["id"]):
+    st.markdown(
+        f"""
+        <style>
+        .section-nav {{
+            position: sticky; top: 0; z-index: 999;
+            background: {C['panel']}; border: 1px solid {C['line']}; border-radius: 14px;
+            padding: 12px 20px; margin-bottom: 18px; box-shadow: 0 2px 10px rgba(58,46,31,0.08);
+            display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+        }}
+        .section-nav a {{
+            color: {C['ivory']}; text-decoration: none; font-size: 17px; font-weight: 700;
+            padding: 8px 18px; border-radius: 22px; border: 1px solid transparent;
+            transition: all 0.15s ease; white-space: nowrap;
+        }}
+        .section-nav a:hover {{
+            background: {C['panelSoft']}; border-color: {C['gold']}; color: {C['gold']};
+        }}
+        </style>
+        <div class="section-nav">
+            <a href="#section-transit">🔄 Current Transit</a>
+            <a href="#section-remedies">📿 Day-wise Remedies</a>
+            <a href="#section-navtara">🌙 Navtara Chakra</a>
+            <a href="#section-muhurta">🕉️ Panchang &amp; Muhurta</a>
+            <a href="#section-compat">💞 Compatibility</a>
+            <a href="#section-charts">📁 Charts</a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 if PAYMENT_TEST_MODE:
     st.markdown(
@@ -4011,228 +4189,290 @@ if is_premium(user_id):
             mime="text/html", use_container_width=True,
         )
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    tab_transit, tab_remedy, tab_navtara, tab_muhurta, tab_compat = st.tabs(
-        ["🔄 Current Transit", "📿 Day-wise Remedies", "🌙 Navtara Chakra", "🕉️ Panchang & Muhurta", "💞 Compatibility"]
+    st.markdown('<div id="section-transit"></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kcard" style="border-top:3px solid {C["gold"]};"><h4 style="margin-bottom:14px;">🔄 Current Transit</h4>', unsafe_allow_html=True)
+    st.markdown(f'<p class="kmuted" style="margin-bottom:10px;">As of {transit_label} '
+                 f'({form["city"][0]})</p>', unsafe_allow_html=True)
+    t_header = "<tr><th>Graha</th><th>Degree</th><th>Zodiac Sign</th><th>Nakṣatra</th></tr>"
+    t_rows = []
+    for b in core_transit_bodies:
+        if b["key"] == "As":
+            continue
+        retro = " ℞" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
+        t_rows.append(
+            f'<tr><td class="body-key">{b["key"]}</td>'
+            f'<td>{fmt_deg(b["inSign"])}{retro}</td>'
+            f'<td>{SIGNS[b["sign"]]}</td>'
+            f'<td>{NAKSHATRAS[b["nakIdx"]]}</td></tr>'
+        )
+    st.markdown(
+        f'<table class="gtable">{t_header}{"".join(t_rows)}</table>'
+        f'<p class="kmuted" style="font-size:12px;margin-top:8px;">'
+        "℞ = retrograde.</p>",
+        unsafe_allow_html=True,
     )
 
-    with tab_transit:
-        st.markdown(f'<p class="kmuted" style="margin-bottom:10px;">As of {transit_label} '
-                     f'({form["city"][0]})</p>', unsafe_allow_html=True)
-        t_header = "<tr><th>Graha</th><th>Degree</th><th>Zodiac Sign</th><th>Nakṣatra</th></tr>"
-        t_rows = []
-        for b in core_transit_bodies:
-            if b["key"] == "As":
-                continue
-            retro = " ℞" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
-            t_rows.append(
-                f'<tr><td class="body-key">{b["key"]}</td>'
-                f'<td>{fmt_deg(b["inSign"])}{retro}</td>'
-                f'<td>{SIGNS[b["sign"]]}</td>'
-                f'<td>{NAKSHATRAS[b["nakIdx"]]}</td></tr>'
-            )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div id="section-remedies"></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kcard" style="border-top:3px solid {C["gold"]};"><h4 style="margin-bottom:14px;">📿 Day-wise Remedies</h4>', unsafe_allow_html=True)
+    today_idx = date.today().isoweekday() % 7  # 0=Sunday .. 6=Saturday
+    r_header = "<tr><th>Day</th><th>Graha</th><th>Gemstone</th><th>Colour</th><th>Suggested Practice</th></tr>"
+    r_rows = []
+    for i, (day_name, key, gem, colour, remedy) in enumerate(DAY_REMEDIES):
+        style = f' style="background:{C["panelSoft"]};font-weight:700;"' if i == today_idx else ""
+        r_rows.append(
+            f'<tr{style}><td>{day_name}{" (today)" if i == today_idx else ""}</td>'
+            f'<td>{BODY_FULLNAME_ASCII.get(key, key)}</td><td>{gem}</td><td>{colour}</td>'
+            f'<td>{remedy}</td></tr>'
+        )
+    st.markdown(f'<table class="gtable">{r_header}{"".join(r_rows)}</table>', unsafe_allow_html=True)
+    st.caption(
+        "⚠️ General traditional associations, not a personalised prescription — gemstones in "
+        "particular should only be worn after a proper chart analysis, since an unsuitable one "
+        "can do more harm than good for some charts."
+    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div id="section-navtara"></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kcard" style="border-top:3px solid {C["gold"]};"><h4 style="margin-bottom:14px;">🌙 Navtara Chakra</h4>', unsafe_allow_html=True)
+    render_navtara_chakra_tab(b_moon["nakIdx"], tz)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div id="section-muhurta"></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kcard" style="border-top:3px solid {C["gold"]};"><h4 style="margin-bottom:14px;">🕉️ Panchang & Muhurta</h4>', unsafe_allow_html=True)
+    pm_mode = st.radio(
+        "Mode", ["Daily Panchang", "Find Muhurta"], horizontal=True, key="pm_mode",
+        label_visibility="collapsed",
+    )
+
+    if pm_mode == "Daily Panchang":
+        pm_date = st.date_input("Date", value=date.today(), key="pm_panchang_date")
+        pmw = compute_muhurta_windows(pm_date.year, pm_date.month, pm_date.day, lat, lon, tz)
+        pm_chart = compute_chart(pm_date.year, pm_date.month, pm_date.day, 12, 0, lat, lon, tz)
+        pm_pan = pm_chart["panchanga"]
         st.markdown(
-            f'<table class="gtable">{t_header}{"".join(t_rows)}</table>'
-            f'<p class="kmuted" style="font-size:12px;margin-top:8px;">'
-            "℞ = retrograde.</p>",
+            f"""
+            <div class="kcard" style="margin-top:10px;">
+              <div class="krow"><span class="kmuted">Vāra</span><span>{VARAS[pm_date.isoweekday() % 7]}</span></div>
+              <div class="krow"><span class="kmuted">Tithi</span><span>{pm_pan['paksha']} {pm_pan['tithiName']}</span></div>
+              <div class="krow"><span class="kmuted">Nakṣatra</span><span>{NAKSHATRAS[pm_pan['nakIdx']]}</span></div>
+              <div class="krow"><span class="kmuted">Yoga</span><span>{YOGAS[pm_pan['yogaIdx']]}</span></div>
+              <div class="krow"><span class="kmuted">Karaṇa</span><span>{pm_pan['karana']}</span></div>
+              <div class="krow"><span class="kmuted">Sunrise</span><span>{_fmt_hm(pmw['sunrise'])}</span></div>
+              <div class="krow"><span class="kmuted">Sunset</span><span>{_fmt_hm(pmw['sunset'])}</span></div>
+              <div class="krow"><span class="ksindoor">Abhijit Muhūrta</span><span class="ksindoor">{_fmt_hm(pmw['abhijit'][0])} – {_fmt_hm(pmw['abhijit'][1])}</span></div>
+              <div class="krow"><span class="kmuted">Rāhu Kālam (avoid)</span><span>{_fmt_hm(pmw['rahu_kalam'][0])} – {_fmt_hm(pmw['rahu_kalam'][1])}</span></div>
+              <div class="krow"><span class="kmuted">Yamaganda (avoid)</span><span>{_fmt_hm(pmw['yamaganda'][0])} – {_fmt_hm(pmw['yamaganda'][1])}</span></div>
+              <div class="krow"><span class="kmuted">Gulika Kālam (avoid)</span><span>{_fmt_hm(pmw['gulika_kalam'][0])} – {_fmt_hm(pmw['gulika_kalam'][1])}</span></div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
+        st.caption(f"Calculated for {form['city'][0]} ({form['city'][1]}).")
 
-    with tab_remedy:
-        today_idx = date.today().isoweekday() % 7  # 0=Sunday .. 6=Saturday
-        r_header = "<tr><th>Day</th><th>Graha</th><th>Gemstone</th><th>Colour</th><th>Suggested Practice</th></tr>"
-        r_rows = []
-        for i, (day_name, key, gem, colour, remedy) in enumerate(DAY_REMEDIES):
-            style = f' style="background:{C["panelSoft"]};font-weight:700;"' if i == today_idx else ""
-            r_rows.append(
-                f'<tr{style}><td>{day_name}{" (today)" if i == today_idx else ""}</td>'
-                f'<td>{BODY_FULLNAME_ASCII.get(key, key)}</td><td>{gem}</td><td>{colour}</td>'
-                f'<td>{remedy}</td></tr>'
-            )
-        st.markdown(f'<table class="gtable">{r_header}{"".join(r_rows)}</table>', unsafe_allow_html=True)
-        st.caption(
-            "⚠️ General traditional associations, not a personalised prescription — gemstones in "
-            "particular should only be worn after a proper chart analysis, since an unsuitable one "
-            "can do more harm than good for some charts."
-        )
-
-    with tab_navtara:
-        render_navtara_chakra_tab(b_moon["nakIdx"], tz)
-
-    with tab_muhurta:
-        pm_mode = st.radio(
-            "Mode", ["Daily Panchang", "Find Muhurta"], horizontal=True, key="pm_mode",
+    else:
+        st.markdown('<p class="kmuted" style="margin-bottom:6px;">What are you planning?</p>', unsafe_allow_html=True)
+        activity = st.selectbox(
+            "Activity", list(MUHURTA_ACTIVITIES.keys()), key="muhurta_activity",
             label_visibility="collapsed",
         )
-
-        if pm_mode == "Daily Panchang":
-            pm_date = st.date_input("Date", value=date.today(), key="pm_panchang_date")
-            pmw = compute_muhurta_windows(pm_date.year, pm_date.month, pm_date.day, lat, lon, tz)
-            pm_chart = compute_chart(pm_date.year, pm_date.month, pm_date.day, 12, 0, lat, lon, tz)
-            pm_pan = pm_chart["panchanga"]
-            st.markdown(
-                f"""
-                <div class="kcard" style="margin-top:10px;">
-                  <div class="krow"><span class="kmuted">Vāra</span><span>{VARAS[pm_date.isoweekday() % 7]}</span></div>
-                  <div class="krow"><span class="kmuted">Tithi</span><span>{pm_pan['paksha']} {pm_pan['tithiName']}</span></div>
-                  <div class="krow"><span class="kmuted">Nakṣatra</span><span>{NAKSHATRAS[pm_pan['nakIdx']]}</span></div>
-                  <div class="krow"><span class="kmuted">Yoga</span><span>{YOGAS[pm_pan['yogaIdx']]}</span></div>
-                  <div class="krow"><span class="kmuted">Karaṇa</span><span>{pm_pan['karana']}</span></div>
-                  <div class="krow"><span class="kmuted">Sunrise</span><span>{_fmt_hm(pmw['sunrise'])}</span></div>
-                  <div class="krow"><span class="kmuted">Sunset</span><span>{_fmt_hm(pmw['sunset'])}</span></div>
-                  <div class="krow"><span class="ksindoor">Abhijit Muhūrta</span><span class="ksindoor">{_fmt_hm(pmw['abhijit'][0])} – {_fmt_hm(pmw['abhijit'][1])}</span></div>
-                  <div class="krow"><span class="kmuted">Rāhu Kālam (avoid)</span><span>{_fmt_hm(pmw['rahu_kalam'][0])} – {_fmt_hm(pmw['rahu_kalam'][1])}</span></div>
-                  <div class="krow"><span class="kmuted">Yamaganda (avoid)</span><span>{_fmt_hm(pmw['yamaganda'][0])} – {_fmt_hm(pmw['yamaganda'][1])}</span></div>
-                  <div class="krow"><span class="kmuted">Gulika Kālam (avoid)</span><span>{_fmt_hm(pmw['gulika_kalam'][0])} – {_fmt_hm(pmw['gulika_kalam'][1])}</span></div>
-                </div>
-                """,
-                unsafe_allow_html=True,
+        mcol1, mcol2 = st.columns(2)
+        with mcol1:
+            search_from = st.date_input("Search from", value=date.today(), key="muhurta_from")
+        with mcol2:
+            range_days = st.number_input(
+                "Range (days)", min_value=7, max_value=180, value=45, step=1, key="muhurta_range"
             )
-            st.caption(f"Calculated for {form['city'][0]} ({form['city'][1]}).")
-
-        else:
-            st.markdown('<p class="kmuted" style="margin-bottom:6px;">What are you planning?</p>', unsafe_allow_html=True)
-            activity = st.selectbox(
-                "Activity", list(MUHURTA_ACTIVITIES.keys()), key="muhurta_activity",
-                label_visibility="collapsed",
+        exclude_overlap = st.checkbox(
+            "Exclude Rāhu, Gulika and Yamaganda overlap with Abhijit", value=True, key="muhurta_exclude"
+        )
+        if st.button("🔍 Find calculated windows", use_container_width=True, key="muhurta_search"):
+            found = find_muhurta_windows(
+                activity, search_from, int(range_days), lat, lon, tz,
+                exclude_kalam_overlap=exclude_overlap,
             )
-            mcol1, mcol2 = st.columns(2)
-            with mcol1:
-                search_from = st.date_input("Search from", value=date.today(), key="muhurta_from")
-            with mcol2:
-                range_days = st.number_input(
-                    "Range (days)", min_value=7, max_value=180, value=45, step=1, key="muhurta_range"
+            st.session_state["muhurta_results"] = found
+
+        results = st.session_state.get("muhurta_results")
+        if results is not None:
+            if not results:
+                st.warning("No windows scored 50% or higher in this range — try widening the range or picking a different activity.")
+            else:
+                st.markdown(
+                    f'<p class="ksindoor" style="font-weight:700;margin:14px 0 10px;">'
+                    f'{len(results)} Panchāṅga-screened window(s) found</p>',
+                    unsafe_allow_html=True,
                 )
-            exclude_overlap = st.checkbox(
-                "Exclude Rāhu, Gulika and Yamaganda overlap with Abhijit", value=True, key="muhurta_exclude"
-            )
-            if st.button("🔍 Find calculated windows", use_container_width=True, key="muhurta_search"):
-                found = find_muhurta_windows(
-                    activity, search_from, int(range_days), lat, lon, tz,
-                    exclude_kalam_overlap=exclude_overlap,
-                )
-                st.session_state["muhurta_results"] = found
-
-            results = st.session_state.get("muhurta_results")
-            if results is not None:
-                if not results:
-                    st.warning("No windows scored 50% or higher in this range — try widening the range or picking a different activity.")
-                else:
+                for i, r in enumerate(results, 1):
+                    pct = int(round(r["score"] * 100))
+                    d = r["date"]
                     st.markdown(
-                        f'<p class="ksindoor" style="font-weight:700;margin:14px 0 10px;">'
-                        f'{len(results)} Panchāṅga-screened window(s) found</p>',
+                        f"""
+                        <div class="kcard" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                          <div>
+                            <p class="kmuted" style="font-size:12px;margin:0 0 2px;">
+                              {d.strftime('%A, %d %B %Y')} &middot; {NAKSHATRAS[r['nak_idx']]}</p>
+                            <p style="font-size:20px;font-weight:700;margin:0 0 4px;">
+                              {_fmt_hm(r['abhijit'][0])} – {_fmt_hm(r['abhijit'][1])}</p>
+                            <p class="kmuted" style="font-size:13px;margin:0;">
+                              {r['paksha']} {r['tithi_name']} &middot; {YOGAS[r['yoga_idx']]} &middot;
+                              screened outside Rāhu, Gulika and Yamaganda</p>
+                          </div>
+                          <div style="text-align:center;flex-shrink:0;margin-left:16px;">
+                            <div style="width:56px;height:56px;border-radius:50%;background:{C['panelSoft']};
+                              border:2px solid {C['gold']};display:flex;align-items:center;justify-content:center;
+                              font-size:20px;color:{C['gold']};">&#10003;</div>
+                            <p class="kmuted" style="font-size:11px;margin:4px 0 0;">{pct}% rules</p>
+                          </div>
+                        </div>
+                        """,
                         unsafe_allow_html=True,
                     )
-                    for i, r in enumerate(results, 1):
-                        pct = int(round(r["score"] * 100))
-                        d = r["date"]
-                        st.markdown(
-                            f"""
-                            <div class="kcard" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                              <div>
-                                <p class="kmuted" style="font-size:12px;margin:0 0 2px;">
-                                  {d.strftime('%A, %d %B %Y')} &middot; {NAKSHATRAS[r['nak_idx']]}</p>
-                                <p style="font-size:20px;font-weight:700;margin:0 0 4px;">
-                                  {_fmt_hm(r['abhijit'][0])} – {_fmt_hm(r['abhijit'][1])}</p>
-                                <p class="kmuted" style="font-size:13px;margin:0;">
-                                  {r['paksha']} {r['tithi_name']} &middot; {YOGAS[r['yoga_idx']]} &middot;
-                                  screened outside Rāhu, Gulika and Yamaganda</p>
-                              </div>
-                              <div style="text-align:center;flex-shrink:0;margin-left:16px;">
-                                <div style="width:56px;height:56px;border-radius:50%;background:{C['panelSoft']};
-                                  border:2px solid {C['gold']};display:flex;align-items:center;justify-content:center;
-                                  font-size:20px;color:{C['gold']};">&#10003;</div>
-                                <p class="kmuted" style="font-size:11px;margin:4px 0 0;">{pct}% rules</p>
-                              </div>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-            st.caption(
-                "⚠️ General traditional guidance (favourable weekday, nakṣatra, and avoiding rikta tithi / "
-                "Rāhu-Gulika-Yamaganda overlap for the midday Abhijit window) — not a substitute for a full "
-                "professional muhūrta consultation, which also weighs the lagna at the exact moment, planetary "
-                "strength, and doṣas beyond what's checked here."
-            )
+        st.caption(
+            "⚠️ General traditional guidance (favourable weekday, nakṣatra, and avoiding rikta tithi / "
+            "Rāhu-Gulika-Yamaganda overlap for the midday Abhijit window) — not a substitute for a full "
+            "professional muhūrta consultation, which also weighs the lagna at the exact moment, planetary "
+            "strength, and doṣas beyond what's checked here."
+        )
 
-    with tab_compat:
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div id="section-compat"></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kcard" style="border-top:3px solid {C["gold"]};"><h4 style="margin-bottom:14px;">💞 Compatibility</h4>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="kmuted" style="margin-bottom:14px;">Checks Moon (nakṣatra tara + sign-lord friendship), '
+        'Ascendant (lord friendship + house relationship), and Jupiter (dignity + cross-placement to the '
+        'partner\'s Moon) between two birth charts.</p>',
+        unsafe_allow_html=True,
+    )
+    cp_a, cp_b = st.columns(2)
+    with cp_a:
+        st.markdown(f'<p style="color:{C["gold"]};font-weight:700;">PERSON A</p>', unsafe_allow_html=True)
+        a_name = st.text_input("Name", value="Person A", key="compat_a_name")
+        a_dob = st.date_input("Date of birth", value=date(1995, 6, 12), key="compat_a_dob",
+                               min_value=date(1900, 1, 1), max_value=date(2100, 12, 31))
+        a_h, a_m = st.columns(2)
+        with a_h:
+            a_hour = st.number_input("Hour", min_value=0, max_value=23, value=10, key="compat_a_hour")
+        with a_m:
+            a_min = st.number_input("Minute", min_value=0, max_value=59, value=30, key="compat_a_min")
+        a_city_query = st.text_input("Birth place", value="Bathinda", key="compat_a_city")
+        a_matches = [c for c in CITIES if a_city_query.lower() in (c[0] + " " + c[1]).lower()] or CITIES[:5]
+        a_city_label = st.selectbox("Match", [f"{c[0]} · {c[1]}" for c in a_matches[:5]], key="compat_a_city_sel")
+        a_city = a_matches[[f"{c[0]} · {c[1]}" for c in a_matches[:5]].index(a_city_label)]
+
+    with cp_b:
+        st.markdown(f'<p style="color:{C["sindoor"]};font-weight:700;">PERSON B</p>', unsafe_allow_html=True)
+        b_name = st.text_input("Name", value="Person B", key="compat_b_name")
+        b_dob = st.date_input("Date of birth", value=date(1994, 3, 20), key="compat_b_dob",
+                               min_value=date(1900, 1, 1), max_value=date(2100, 12, 31))
+        b_h, b_m = st.columns(2)
+        with b_h:
+            b_hour = st.number_input("Hour", min_value=0, max_value=23, value=14, key="compat_b_hour")
+        with b_m:
+            b_min = st.number_input("Minute", min_value=0, max_value=59, value=15, key="compat_b_min")
+        b_city_query = st.text_input("Birth place", value="Bathinda", key="compat_b_city")
+        b_matches = [c for c in CITIES if b_city_query.lower() in (c[0] + " " + c[1]).lower()] or CITIES[:5]
+        b_city_label = st.selectbox("Match", [f"{c[0]} · {c[1]}" for c in b_matches[:5]], key="compat_b_city_sel")
+        b_city = b_matches[[f"{c[0]} · {c[1]}" for c in b_matches[:5]].index(b_city_label)]
+
+    if st.button("💞 Calculate compatibility", use_container_width=True, key="compat_calc_btn"):
+        chart_a = compute_chart(a_dob.year, a_dob.month, a_dob.day, int(a_hour), int(a_min),
+                                 a_city[2], a_city[3], a_city[4])
+        chart_b = compute_chart(b_dob.year, b_dob.month, b_dob.day, int(b_hour), int(b_min),
+                                 b_city[2], b_city[3], b_city[4])
+        st.session_state["compat_result"] = compute_compatibility(chart_a, chart_b)
+        st.session_state["compat_names"] = (a_name or "Person A", b_name or "Person B")
+
+    result = st.session_state.get("compat_result")
+    if result:
+        n_a, n_b = st.session_state.get("compat_names", ("Person A", "Person B"))
         st.markdown(
-            '<p class="kmuted" style="margin-bottom:14px;">Checks Moon (nakṣatra tara + sign-lord friendship), '
-            'Ascendant (lord friendship + house relationship), and Jupiter (dignity + cross-placement to the '
-            'partner\'s Moon) between two birth charts.</p>',
+            f"""
+            <div class="kcard" style="text-align:center;margin-top:16px;border:2px solid {C['gold']};">
+              <p style="font-size:15px;color:{C['muted']};margin:0;">{n_a} &#10084; {n_b}</p>
+              <p style="font-size:42px;font-weight:700;color:{C['gold']};margin:6px 0;">
+                {result['total']:.1f} <span style="font-size:20px;color:{C['muted']};">/ {result['max_total']:.0f}</span></p>
+              <p style="font-size:16px;font-weight:700;color:{C['sindoor']};margin:0;">{result['verdict']}</p>
+              <p class="kmuted" style="font-size:13px;margin-top:4px;">{result['pct']:.0f}% overall</p>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
-        cp_a, cp_b = st.columns(2)
-        with cp_a:
-            st.markdown(f'<p style="color:{C["gold"]};font-weight:700;">PERSON A</p>', unsafe_allow_html=True)
-            a_name = st.text_input("Name", value="Person A", key="compat_a_name")
-            a_dob = st.date_input("Date of birth", value=date(1995, 6, 12), key="compat_a_dob",
-                                   min_value=date(1900, 1, 1), max_value=date(2100, 12, 31))
-            a_h, a_m = st.columns(2)
-            with a_h:
-                a_hour = st.number_input("Hour", min_value=0, max_value=23, value=10, key="compat_a_hour")
-            with a_m:
-                a_min = st.number_input("Minute", min_value=0, max_value=59, value=30, key="compat_a_min")
-            a_city_query = st.text_input("Birth place", value="Bathinda", key="compat_a_city")
-            a_matches = [c for c in CITIES if a_city_query.lower() in (c[0] + " " + c[1]).lower()] or CITIES[:5]
-            a_city_label = st.selectbox("Match", [f"{c[0]} · {c[1]}" for c in a_matches[:5]], key="compat_a_city_sel")
-            a_city = a_matches[[f"{c[0]} · {c[1]}" for c in a_matches[:5]].index(a_city_label)]
+        rows_html = "".join(
+            f'<tr><td>{label}</td><td>{detail}</td>'
+            f'<td style="text-align:right;font-weight:700;">{score:.2f} / {maxs:.0f}</td></tr>'
+            for label, score, maxs, detail in result["components"]
+        )
+        st.markdown(
+            f'<table class="gtable" style="margin-top:14px;">'
+            f'<tr><th>Factor</th><th>Detail</th><th style="text-align:right;">Score</th></tr>'
+            f'{rows_html}</table>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "⚠️ This checks a focused subset — Moon, Ascendant, and Jupiter only — not the full classical "
+            "Aṣṭakoota Guṇa Milan (which scores eight factors — Varna, Vashya, Tara, Yoni, Graha Maitri, "
+            "Gaṇa, Bhakoot, Nāḍī — out of 36). Treat this as a partial, general indicator, not a complete "
+            "traditional match report; a full consultation weighs considerably more than what's checked here."
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        with cp_b:
-            st.markdown(f'<p style="color:{C["sindoor"]};font-weight:700;">PERSON B</p>', unsafe_allow_html=True)
-            b_name = st.text_input("Name", value="Person B", key="compat_b_name")
-            b_dob = st.date_input("Date of birth", value=date(1994, 3, 20), key="compat_b_dob",
-                                   min_value=date(1900, 1, 1), max_value=date(2100, 12, 31))
-            b_h, b_m = st.columns(2)
-            with b_h:
-                b_hour = st.number_input("Hour", min_value=0, max_value=23, value=14, key="compat_b_hour")
-            with b_m:
-                b_min = st.number_input("Minute", min_value=0, max_value=59, value=15, key="compat_b_min")
-            b_city_query = st.text_input("Birth place", value="Bathinda", key="compat_b_city")
-            b_matches = [c for c in CITIES if b_city_query.lower() in (c[0] + " " + c[1]).lower()] or CITIES[:5]
-            b_city_label = st.selectbox("Match", [f"{c[0]} · {c[1]}" for c in b_matches[:5]], key="compat_b_city_sel")
-            b_city = b_matches[[f"{c[0]} · {c[1]}" for c in b_matches[:5]].index(b_city_label)]
+    st.markdown('<div id="section-charts"></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kcard" style="border-top:3px solid {C["gold"]};"><h4 style="margin-bottom:14px;">📁 Charts</h4>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="kmuted" style="margin-bottom:10px;">Save the chart currently shown above, and reload any '
+        'previously saved chart — handy for family members or repeat clients.</p>',
+        unsafe_allow_html=True,
+    )
+    sc_col1, sc_col2 = st.columns([2, 1])
+    with sc_col1:
+        chart_label = st.text_input(
+            "Label for this chart", value=(form.get("name") or "Untitled chart"), key="save_chart_label",
+        )
+    with sc_col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("💾 Save this chart", use_container_width=True, key="save_chart_btn"):
+            save_chart_to_library(
+                user_id, chart_label.strip() or "Untitled chart", form.get("name", ""),
+                form["dob"].isoformat(), form["tob"].isoformat(),
+                form["city"][0], form["city"][1], form["city"][2], form["city"][3], form["city"][4],
+            )
+            st.success(f"Saved “{chart_label.strip() or 'Untitled chart'}” to your chart library.")
 
-        if st.button("💞 Calculate compatibility", use_container_width=True, key="compat_calc_btn"):
-            chart_a = compute_chart(a_dob.year, a_dob.month, a_dob.day, int(a_hour), int(a_min),
-                                     a_city[2], a_city[3], a_city[4])
-            chart_b = compute_chart(b_dob.year, b_dob.month, b_dob.day, int(b_hour), int(b_min),
-                                     b_city[2], b_city[3], b_city[4])
-            st.session_state["compat_result"] = compute_compatibility(chart_a, chart_b)
-            st.session_state["compat_names"] = (a_name or "Person A", b_name or "Person B")
+    saved = list_saved_charts(user_id)
+    if not saved:
+        st.caption("No saved charts yet — cast a chart above, then save it here.")
+    else:
+        st.markdown(f'<p class="kmuted" style="margin-top:14px;">{len(saved)} saved chart(s)</p>', unsafe_allow_html=True)
+        for sc in saved:
+            sc_dob = date.fromisoformat(sc["dob"])
+            sc_tob = dtime.fromisoformat(sc["tob"])
+            row_l, row_load, row_del = st.columns([4, 1, 1])
+            with row_l:
+                st.markdown(
+                    f'<div class="krow" style="border-bottom:none;">'
+                    f'<span><b>{sc["label"]}</b> — {sc["name"] or "unnamed"}</span>'
+                    f'<span class="kmuted">{sc_dob.strftime("%d %b %Y")} · {sc_tob.strftime("%H:%M")} · '
+                    f'{sc["city_name"]}</span></div>',
+                    unsafe_allow_html=True,
+                )
+            with row_load:
+                if st.button("Load", key=f"load_chart_{sc['id']}", use_container_width=True):
+                    st.session_state["form"] = {
+                        "name": sc["name"] or "", "dob": sc_dob, "tob": sc_tob,
+                        "city": (sc["city_name"], sc["city_region"], sc["lat"], sc["lon"], sc["tz"]),
+                    }
+                    st.rerun()
+            with row_del:
+                if st.button("Delete", key=f"delete_chart_{sc['id']}", use_container_width=True):
+                    delete_saved_chart(sc["id"], user_id)
+                    st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        result = st.session_state.get("compat_result")
-        if result:
-            n_a, n_b = st.session_state.get("compat_names", ("Person A", "Person B"))
-            st.markdown(
-                f"""
-                <div class="kcard" style="text-align:center;margin-top:16px;border:2px solid {C['gold']};">
-                  <p style="font-size:15px;color:{C['muted']};margin:0;">{n_a} &#10084; {n_b}</p>
-                  <p style="font-size:42px;font-weight:700;color:{C['gold']};margin:6px 0;">
-                    {result['total']:.1f} <span style="font-size:20px;color:{C['muted']};">/ {result['max_total']:.0f}</span></p>
-                  <p style="font-size:16px;font-weight:700;color:{C['sindoor']};margin:0;">{result['verdict']}</p>
-                  <p class="kmuted" style="font-size:13px;margin-top:4px;">{result['pct']:.0f}% overall</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            rows_html = "".join(
-                f'<tr><td>{label}</td><td>{detail}</td>'
-                f'<td style="text-align:right;font-weight:700;">{score:.2f} / {maxs:.0f}</td></tr>'
-                for label, score, maxs, detail in result["components"]
-            )
-            st.markdown(
-                f'<table class="gtable" style="margin-top:14px;">'
-                f'<tr><th>Factor</th><th>Detail</th><th style="text-align:right;">Score</th></tr>'
-                f'{rows_html}</table>',
-                unsafe_allow_html=True,
-            )
-            st.caption(
-                "⚠️ This checks a focused subset — Moon, Ascendant, and Jupiter only — not the full classical "
-                "Aṣṭakoota Guṇa Milan (which scores eight factors — Varna, Vashya, Tara, Yoni, Graha Maitri, "
-                "Gaṇa, Bhakoot, Nāḍī — out of 36). Treat this as a partial, general indicator, not a complete "
-                "traditional match report; a full consultation weighs considerably more than what's checked here."
-            )
 
 else:
     st.markdown(
