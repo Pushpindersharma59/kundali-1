@@ -1653,11 +1653,11 @@ def _solid_sphere_svg(parts, defs, grad_id, cx, cy, r, base_hex, highlight_hex, 
 # ---- Poster planet colours (base, highlight), matched to the provided
 # design's exact gradients, reused via the existing _solid_sphere_svg helper.
 POSTER_PLANET_COLORS = {
-    "Su": ("#ffc52c", "#fffbd5"), "Mo": ("#a8a8a8", "#efefef"),
-    "Ma": ("#bd3e1f", "#f16a39"), "Me": ("#79746d", "#c5beb1"),
-    "Jp": ("#a56825", "#f1d59a"), "Ve": ("#c98c2e", "#f7df9d"),
-    "Sa": ("#a47c42", "#ead4a1"), "Ra": ("#292b30", "#727477"),
-    "Ke": ("#6f3c2c", "#bd8057"),
+    "Su": ("#E67E22", "#FFD6A8"), "Mo": ("#D8D8D8", "#FFFFFF"),
+    "Ma": ("#E74C3C", "#FF9E8F"), "Me": ("#2ECC71", "#B8F5D0"),
+    "Jp": ("#a56825", "#f1d59a"), "Ve": ("#F1948A", "#FFD9D4"),
+    "Sa": ("#a47c42", "#ead4a1"), "Ra": ("#8E44AD", "#D8B8E8"),
+    "Ke": ("#95A5A6", "#E0E5E5"),
 }
 POSTER_PLANET_NAMES = {
     "Su": "Sun", "Mo": "Moon", "Ma": "Mars", "Me": "Mercury", "Jp": "Jupiter",
@@ -1720,9 +1720,9 @@ def build_planetspath_solar_svg(size: int = 760) -> str:
         if key == "Su":
             defs.append(
                 '<radialGradient id="ppSunFlare" cx="50%" cy="50%" r="60%">'
-                '<stop offset="0%" stop-color="#FFF3C4" stop-opacity="0.9"/>'
-                '<stop offset="60%" stop-color="#FFD98A" stop-opacity="0.25"/>'
-                '<stop offset="100%" stop-color="#FFD98A" stop-opacity="0"/></radialGradient>'
+                '<stop offset="0%" stop-color="#FFCB8A" stop-opacity="0.9"/>'
+                '<stop offset="60%" stop-color="#F5A25C" stop-opacity="0.25"/>'
+                '<stop offset="100%" stop-color="#F5A25C" stop-opacity="0"/></radialGradient>'
             )
             parts.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="{r*2.1:.1f}" fill="url(#ppSunFlare)"/>')
         if has_rings:
@@ -1815,22 +1815,22 @@ def render_auth_screen():
                 linear-gradient(135deg,#ffffff 0%,#fffdf8 48%,#fff8e9 100%) !important;
             background-attachment: fixed;
         }}
-        .pp-header {{ display:flex; align-items:center; gap:16px; padding:14px 4px 20px;
-            border-bottom:1px solid #eee6d7; margin-bottom:26px; }}
-        .pp-brand-name {{ color:#714d14; font-size:36px; font-weight:bold; letter-spacing:-1px;
+        .pp-header {{ display:flex; align-items:center; gap:16px; padding:10px 4px 14px;
+            border-bottom:1px solid #eee6d7; margin-bottom:16px; }}
+        .pp-brand-name {{ color:#714d14; font-size:52px; font-weight:bold; letter-spacing:-1px;
             font-family:Georgia,serif; white-space:nowrap; line-height:1.1; }}
         .pp-tagline {{ font-family:Arial,sans-serif; font-size:11px; letter-spacing:4px; color:#52617a; margin-top:4px; }}
-        .hero-headline {{ color:{NAVY}; font-family:Georgia,serif; font-size:34px; line-height:1.18;
-            margin:6px 0 12px; }}
+        .hero-headline {{ color:{NAVY}; font-family:Georgia,serif; font-size:30px; line-height:1.15;
+            margin:4px 0 8px; }}
         .hero-headline .accent {{ color:{GOLD}; }}
-        .hero-desc {{ font-family:Arial,sans-serif; color:#59647a; font-size:15px; line-height:1.65;
+        .hero-desc {{ font-family:Arial,sans-serif; color:#59647a; font-size:14px; line-height:1.55;
             max-width:430px; margin-bottom:21px; }}
-        .welcome-back {{ text-align:center; font-size:21px; color:#bd7e13; font-family:Georgia,serif;
-            margin:4px 0 14px; }}
+        .welcome-back {{ text-align:center; font-size:19px; color:#bd7e13; font-family:Georgia,serif;
+            margin:2px 0 10px; }}
         .welcome-back:before, .welcome-back:after {{ content:"\u2727"; margin:0 14px; color:#e1a63a; }}
         div[data-testid="stTabs"] {{
             background: rgba(255,255,255,.92); border:1px solid #eee0c6; border-radius:22px;
-            padding:16px 25px 22px;
+            padding:12px 25px 18px;
             box-shadow: 0 15px 35px rgba(117,88,28,.10), 0 3px 8px rgba(117,88,28,.05);
             max-width:410px;
         }}
@@ -1868,7 +1868,7 @@ def render_auth_screen():
 
     st.markdown(
         f'<div class="pp-header">'
-        f'<div style="max-width:56px;">{build_compass_star_svg(56)}</div>'
+        f'<div style="max-width:66px;">{build_compass_star_svg(66)}</div>'
         f'<div><div class="pp-brand-name">PlanetsPath</div>'
         f'<div class="pp-tagline">DISCOVER &nbsp;\u2022&nbsp; REFLECT &nbsp;\u2022&nbsp; GROW</div></div>'
         f'</div>',
@@ -1939,7 +1939,7 @@ def render_auth_screen():
 
     with hero_r:
         solar_svg = build_planetspath_solar_svg(720)
-        st.markdown(f'<div style="max-width:680px;margin:0 auto;">{solar_svg}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="max-width:520px;margin:20px auto 0;">{solar_svg}</div>', unsafe_allow_html=True)
 
     render_planetspath_features()
 
