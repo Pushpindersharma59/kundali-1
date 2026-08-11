@@ -1756,26 +1756,58 @@ def build_planetspath_solar_svg(size: int = 760) -> str:
     return svg_open + "<defs>" + "".join(defs) + "</defs>" + body + "</svg>"
 
 
-def render_planetspath_features():
-    """The poster's feature grid + trust bar, ported as static HTML (reuses
-    FEATURE_STRIP, the same 8-item feature list used throughout the app)."""
-    rows_html = ['<div class="pp-features">']
-    for row_start in (0, 4):
-        rows_html.append('<div class="pp-feature-row">')
-        for icon, title, desc in FEATURE_STRIP[row_start:row_start + 4]:
-            rows_html.append(
-                f'<div class="pp-feature">'
-                f'<div class="pp-feature-icon">{icon}</div>'
-                f'<div class="pp-feature-content">'
-                f'<div class="pp-feature-title">{title.upper()}</div>'
-                f'<div class="pp-feature-text">{desc}</div></div>'
-                f'<div class="pp-feature-arrow">\u203a</div></div>'
-            )
-        rows_html.append('</div>')
-    rows_html.append('</div>')
-    st.markdown("".join(rows_html), unsafe_allow_html=True)
+def render_planetspath_solar_with_features():
+    """One integrated composition: the solar system SVG sits in the center of
+    a 3x3 layout, with all 8 FEATURE_STRIP items filling the surrounding
+    cells — 8 features fits a 3x3 grid minus its center perfectly. Built as
+    an HTML table rather than CSS Grid: table layout is universally
+    supported (works identically in every browser, old or new), whereas
+    grid-template-areas support couldn't be verified from this environment's
+    rendering tools. Replaces the old layout of a solar graphic with a
+    separate feature row below it, which left the space around the planets
+    empty. No chevron arrows — these are informational, not links."""
+    solar_svg = build_planetspath_solar_svg(480)
+
+    def _cell(icon, title, desc):
+        return (
+            f'<td class="pp-grid-cell"><div class="pp-mini-feature">'
+            f'<div class="pp-mini-icon">{icon}</div>'
+            f'<div><div class="pp-mini-title">{title.upper()}</div>'
+            f'<div class="pp-mini-text">{desc}</div></div></div></td>'
+        )
+
+    f = FEATURE_STRIP
+    rows_html = (
+        f'<tr>{_cell(*f[0])}{_cell(*f[1])}{_cell(*f[2])}</tr>'
+        f'<tr>{_cell(*f[3])}'
+        f'<td class="pp-grid-cell" style="text-align:center;vertical-align:middle;">{solar_svg}</td>'
+        f'{_cell(*f[4])}</tr>'
+        f'<tr>{_cell(*f[5])}{_cell(*f[6])}{_cell(*f[7])}</tr>'
+    )
     st.markdown(
-        '<div class="pp-trust">\u2699 Accurate Calculations <span>\u2022</span> '
+        f"""
+        <style>
+        .pp-solar-table {{ width:100%; border-collapse:separate; border-spacing:12px; table-layout:fixed; margin-top:8px; }}
+        .pp-grid-cell {{ width:33.33%; vertical-align:top; }}
+        .pp-mini-feature {{
+            background:rgba(255,255,255,.92); border:1px solid #eadfca; border-radius:14px;
+            padding:12px 14px; display:flex; align-items:center; gap:10px;
+            box-shadow:0 2px 8px rgba(104,82,40,.06); min-height:74px;
+        }}
+        .pp-mini-icon {{
+            width:36px; height:36px; border:1px solid #e8bd65; border-radius:50%;
+            display:flex; align-items:center; justify-content:center; font-size:16px; color:#d28c16;
+            flex-shrink:0; background:linear-gradient(145deg,#fff,#fffaf0);
+        }}
+        .pp-mini-title {{ color:#1b3158; font-weight:700; font-size:12px; letter-spacing:0.01em; margin-bottom:3px; }}
+        .pp-mini-text {{ color:#59657a; font-size:10.5px; line-height:1.3; }}
+        </style>
+        <table class="pp-solar-table"><tbody>{rows_html}</tbody></table>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="pp-trust" style="margin-top:16px;">\u2699 Accurate Calculations <span>\u2022</span> '
         '\u2726 Real Astronomy Data <span>\u2022</span> \u25c8 Trusted Insights</div>',
         unsafe_allow_html=True,
     )
@@ -1951,10 +1983,7 @@ def render_auth_screen():
                         st.success("Account created — you can sign in now.")
 
     with hero_r:
-        solar_svg = build_planetspath_solar_svg(720)
-        st.markdown(f'<div style="max-width:520px;margin:20px auto 0;">{solar_svg}</div>', unsafe_allow_html=True)
-
-    render_planetspath_features()
+        render_planetspath_solar_with_features()
 
 
 
