@@ -2777,6 +2777,65 @@ def compute_muhurta_windows(y: int, mo: int, dd: int, lat: float, lon: float, tz
 
 
 # ============================================================
+# HORA — 24 planetary hours (12 day + 12 night), Chaldean sequence
+# ============================================================
+# Classical technique: sunrise-to-sunset is split into 12 equal "day horas",
+# and that sunset to the NEXT sunrise into 12 equal "night horas", each ruled
+# by one of the 7 classical grahas cycling continuously in Chaldean order
+# (Saturn, Jupiter, Mars, Sun, Venus, Mercury, Moon, repeat). The first hora
+# of any day is ruled by that weekday's own lord.
+
+HORA_LORDS_CHALDEAN = ["Sa", "Jp", "Ma", "Su", "Ve", "Me", "Mo"]
+# weekday index (0=Sun..6=Sat) -> that day's lord's position in the Chaldean list above
+WEEKDAY_HORA_START_IDX = {0: 3, 1: 6, 2: 2, 3: 5, 4: 1, 5: 4, 6: 0}
+
+HORA_EFFECTIVENESS = {
+    "Su": "Most-effective", "Ma": "Most-effective", "Jp": "Most-effective",
+    "Sa": "Detrimental", "Me": "Less-effective", "Ve": "Neutral", "Mo": "Neutral",
+}
+
+
+def compute_hora_table(y: int, mo: int, dd: int, lat: float, lon: float, tz: float) -> dict:
+    """Returns {'day': [...12 horas...], 'night': [...12 horas...]}, each hora
+    a dict with lord, start, end (local decimal hours), effectiveness, and
+    whether its end time rolls into the next calendar day."""
+    sunrise_ut, sunset_ut, _ = sun_times_utc_hours(y, mo, dd, lat, lon)
+    next_d = date(y, mo, dd) + timedelta(days=1)
+    next_sunrise_ut, _, _ = sun_times_utc_hours(next_d.year, next_d.month, next_d.day, lat, lon)
+
+    sunrise_local = sunrise_ut + tz
+    sunset_local = sunset_ut + tz
+    next_sunrise_local = next_sunrise_ut + tz + 24  # relative to this day's start, for continuous math
+
+    weekday = date(y, mo, dd).isoweekday() % 7
+    start_idx = WEEKDAY_HORA_START_IDX[weekday]
+
+    day_len = sunset_local - sunrise_local
+    night_len = next_sunrise_local - sunset_local
+    day_step = day_len / 12
+    night_step = night_len / 12
+
+    def build(n_horas, base_start, step, idx_offset):
+        horas = []
+        for i in range(n_horas):
+            lord = HORA_LORDS_CHALDEAN[(start_idx + idx_offset + i) % 7]
+            h_start = base_start + i * step
+            h_end = h_start + step
+            horas.append({
+                "lord": lord,
+                "start": h_start % 24,
+                "end": h_end % 24,
+                "effectiveness": HORA_EFFECTIVENESS[lord],
+                "next_day": h_end >= 24,
+            })
+        return horas
+
+    day_horas = build(12, sunrise_local, day_step, 0)
+    night_horas = build(12, sunset_local, night_step, 12)
+    return {"day": day_horas, "night": night_horas}
+
+
+# ============================================================
 # MUHURTA FINDER — activity-based electional search
 # ============================================================
 # General traditional guidance compiled from commonly published Panchang
@@ -4374,7 +4433,7 @@ if is_premium(user_id):
     st.markdown('<div id="section-muhurta"></div>', unsafe_allow_html=True)
     st.markdown(f'<div class="kcard" style="border-top:3px solid {C["gold"]};"><h4 style="margin-bottom:14px;">🕉️ Panchang & Muhurta</h4>', unsafe_allow_html=True)
     pm_mode = st.radio(
-        "Mode", ["Daily Panchang", "Find Muhurta"], horizontal=True, key="pm_mode",
+        "Mode", ["Daily Panchang", "Find Muhurta", "Hora Timings"], horizontal=True, key="pm_mode",
         label_visibility="collapsed",
     )
 
@@ -4403,7 +4462,7 @@ if is_premium(user_id):
         )
         st.caption(f"Calculated for {form['city'][0]} ({form['city'][1]}).")
 
-    else:
+    elif pm_mode == "Find Muhurta":
         st.markdown('<p class="kmuted" style="margin-bottom:6px;">What are you planning?</p>', unsafe_allow_html=True)
         activity = st.selectbox(
             "Activity", list(MUHURTA_ACTIVITIES.keys()), key="muhurta_activity",
@@ -4466,6 +4525,53 @@ if is_premium(user_id):
             "Rāhu-Gulika-Yamaganda overlap for the midday Abhijit window) — not a substitute for a full "
             "professional muhūrta consultation, which also weighs the lagna at the exact moment, planetary "
             "strength, and doṣas beyond what's checked here."
+        )
+
+    else:
+        hora_date = st.date_input("Date", value=date.today(), key="hora_date")
+        hora = compute_hora_table(hora_date.year, hora_date.month, hora_date.day, lat, lon, tz)
+        EFF_COLOR = {
+            "Most-effective": "#1E8E3E", "Detrimental": "#C4462B",
+            "Less-effective": "#1A73E8", "Neutral": C["ivory"],
+        }
+
+        def _hora_rows(horas):
+            rows = []
+            for h in horas:
+                color = EFF_COLOR[h["effectiveness"]]
+                star = " *" if h["next_day"] else ""
+                rows.append(
+                    f'<tr><td style="color:{color};font-weight:600;">{BODY_FULLNAME_ASCII.get(h["lord"], h["lord"])}</td>'
+                    f'<td>{_fmt_hm(h["start"])} \u2013 {_fmt_hm(h["end"])}{star}</td></tr>'
+                )
+            return "".join(rows)
+
+        hcol1, hcol2 = st.columns(2)
+        with hcol1:
+            st.markdown(
+                f'<table class="gtable"><tr><th colspan="2" style="text-align:center;">Day Hora</th></tr>'
+                f'<tr><th>Hora</th><th>Time</th></tr>{_hora_rows(hora["day"])}</table>',
+                unsafe_allow_html=True,
+            )
+        with hcol2:
+            st.markdown(
+                f'<table class="gtable"><tr><th colspan="2" style="text-align:center;">Night Hora</th></tr>'
+                f'<tr><th>Hora</th><th>Time</th></tr>{_hora_rows(hora["night"])}</table>',
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            f'<div style="display:flex;gap:18px;flex-wrap:wrap;font-size:13px;margin-top:12px;">'
+            f'<span style="color:{EFF_COLOR["Most-effective"]};font-weight:600;">\u25a0 Most-effective</span>'
+            f'<span style="color:{EFF_COLOR["Detrimental"]};font-weight:600;">\u25a0 Detrimental</span>'
+            f'<span style="color:{EFF_COLOR["Less-effective"]};font-weight:600;">\u25a0 Less-effective</span>'
+            f'<span class="kmuted">* = next calendar day</span></div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "⚠️ Each hora divides sunrise-to-sunset (and that sunset to the next sunrise) into 12 equal "
+            "parts, ruled by the 7 classical grahas in continuous Chaldean order (Saturn, Jupiter, Mars, "
+            "Sun, Venus, Mercury, Moon). General timing guidance — a full electional analysis also weighs "
+            "tithi, nakṣatra, and the lagna at that moment."
         )
 
     st.markdown("</div>", unsafe_allow_html=True)
