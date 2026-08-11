@@ -879,32 +879,50 @@ HOUSE_CENTERS = [
 ]
 
 
-def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int, show_nakshatra: bool = False) -> str:
+HINDI_BODY_ABBR = {
+    "As": "\u0932", "Su": "\u0938\u0942", "Mo": "\u091a\u0902", "Ma": "\u092e\u0902",
+    "Me": "\u092c\u0941", "Jp": "\u0917\u0941", "Ve": "\u0936\u0941", "Sa": "\u0936",
+    "Ra": "\u0930\u093e", "Ke": "\u0915\u0947",
+}
+
+
+def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int, show_nakshatra: bool = False,
+                     language: str = "English", show_transits: bool = True) -> str:
+    """North Indian diamond chart. Each house lays its planets out in an
+    adaptive grid (columns chosen from how many entries share that house)
+    instead of a single vertical stack, with font size shrinking as the
+    count grows — a crowded house (e.g. several birth + transit grahas all
+    sharing one sign) previously overflowed the diamond's boundary; this
+    keeps everything inside it. language="Hindi" swaps planet labels to
+    Devanagari abbreviations; show_transits=False omits transit bodies."""
     by_house = [{"b": [], "t": []} for _ in range(12)]
     for x in birth_bodies:
         by_house[(x["sign"] - asc_sign + 12) % 12]["b"].append(x)
-    for x in transit_bodies:
-        if x["key"] == "As":
-            continue
-        by_house[(x["sign"] - asc_sign + 12) % 12]["t"].append(x)
+    if show_transits:
+        for x in transit_bodies:
+            if x["key"] == "As":
+                continue
+            by_house[(x["sign"] - asc_sign + 12) % 12]["t"].append(x)
 
-    def label(x, kind, cx, y):
+    def label(x, kind, cx, y, font_size, sub_size):
         fill = C["sindoor"] if kind == "t" else (C["moon"] if x["key"] == "As" else C["ivory"])
         sub_fill = C["sindoor"] if kind == "t" else C["muted"]
-        retro_mark = "℞" if (x["retro"] and x["key"] not in ("Ra", "Ke")) else ""
+        retro_mark = "\u211e" if (x["retro"] and x["key"] not in ("Ra", "Ke")) else ""
         deg = math.floor(x["inSign"])
+        key_label = HINDI_BODY_ABBR.get(x["key"], x["key"]) if language == "Hindi" else x["key"]
         nak_line = ""
         if show_nakshatra and x["key"] != "As":
             nak_abbr = NAK_ABBR[x["nakIdx"]]
+            nak_size = max(sub_size - 1.5, 6)
             nak_line = (
-                f'<tspan x="{cx}" dy="11" font-size="8.5" fill="{sub_fill}" '
+                f'<tspan x="{cx}" dy="{sub_size + 2}" font-size="{nak_size}" fill="{sub_fill}" '
                 f'font-family="Georgia, serif">{nak_abbr}</tspan>'
             )
         return (
-            f'<text x="{cx}" y="{y}" text-anchor="middle" font-size="14" font-weight="700" '
-            f'fill="{fill}" font-family="Georgia, serif">{x["key"]}'
-            f'<tspan font-size="10" fill="{sub_fill}" font-family="monospace">'
-            f' {deg}°{retro_mark}</tspan>{nak_line}</text>'
+            f'<text x="{cx}" y="{y}" text-anchor="middle" font-size="{font_size}" font-weight="700" '
+            f'fill="{fill}" font-family="Georgia, serif">{key_label}'
+            f'<tspan font-size="{sub_size}" fill="{sub_fill}" font-family="monospace">'
+            f' {deg}\u00b0{retro_mark}</tspan>{nak_line}</text>'
         )
 
     parts = [
@@ -920,20 +938,45 @@ def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int, show_nakshatra:
         f'stroke-width="1" opacity="0.85" />',
     ]
 
-    step = 24 if show_nakshatra else 14
+    # (max_n, columns, font_size, sub_size, row_height, col_width) — chosen so
+    # even a heavily-crowded house (birth + transit grahas sharing one sign)
+    # stays within the diamond's available space.
+    LAYOUT_TIERS = [
+        (2, 1, 14, 10, 24 if show_nakshatra else 14, 0),
+        (3, 1, 12.5, 9, 21 if show_nakshatra else 13, 0),
+        (6, 2, 10.5, 7.5, 19 if show_nakshatra else 12, 54),
+        (9, 2, 9, 6.5, 16 if show_nakshatra else 10.5, 50),
+        (99, 3, 7.5, 6, 14 if show_nakshatra else 9.5, 40),
+    ]
+
     for h, (cx, cy) in enumerate(HOUSE_CENTERS):
         sign_num = ((asc_sign + h) % 12) + 1
         b, t = by_house[h]["b"], by_house[h]["t"]
-        n = len(b) + len(t)
-        start_y = cy - ((n - 1) * step) / 2 + 4
+        entries = [(x, "b") for x in b] + [(x, "t") for x in t]
+        n = len(entries)
+        if n == 0:
+            parts.append(f'<text x="{cx}" y="{cy - 8}" text-anchor="middle" font-size="10" '
+                          f'fill="{C["muted"]}" font-family="monospace">{sign_num}</text>')
+            continue
+
+        cols, font_size, sub_size, row_h, col_w = next(
+            (c, fs, ss, rh, cw) for max_n, c, fs, ss, rh, cw in LAYOUT_TIERS if n <= max_n
+        )
+        rows = math.ceil(n / cols)
+        total_h = rows * row_h
+        start_y = cy - total_h / 2 + row_h * 0.7
+
         parts.append(
-            f'<text x="{cx}" y="{start_y - step - 2}" text-anchor="middle" font-size="10" '
+            f'<text x="{cx}" y="{start_y - row_h - 2}" text-anchor="middle" font-size="10" '
             f'fill="{C["muted"]}" font-family="monospace">{sign_num}</text>'
         )
-        for i, x in enumerate(b):
-            parts.append(label(x, "b", cx, start_y + i * step))
-        for i, x in enumerate(t):
-            parts.append(label(x, "t", cx, start_y + (len(b) + i) * step))
+        for i, (x, kind) in enumerate(entries):
+            row = i // cols
+            col = i % cols
+            n_in_row = min(cols, n - row * cols)
+            row_x = cx + (col - (n_in_row - 1) / 2) * col_w
+            row_y = start_y + row * row_h
+            parts.append(label(x, kind, row_x, row_y, font_size, sub_size))
 
     parts.append("</svg>")
     return "".join(parts)
@@ -4269,6 +4312,16 @@ tdict = {t["key"]: t for t in transit_chart["bodies"]}
 core_birth_bodies = [b for b in birth_chart["bodies"] if b["key"] in CORE_KEYS]
 core_transit_bodies = [b for b in transit_chart["bodies"] if b["key"] in CORE_KEYS]
 
+# ---- Chart display toggles: read the current (prior-run) values now so
+# they affect this run's chart rendering; the actual widgets are drawn below
+# the charts, per the requested "options at the bottom" placement. Streamlit
+# preserves widget values in session_state across reruns by key, so reading
+# them here before the widgets are instantiated further down still reflects
+# the user's last choice.
+_chart_show_nak = st.session_state.get("chart_show_nakshatra", True)
+_chart_language = st.session_state.get("chart_language", "English")
+_chart_show_transits = st.session_state.get("chart_show_transits", True)
+
 # ---- Row 1: Diamond chart + Circular chart, each with its own D1..D60 selector ----
 c1, c2 = st.columns([1, 1])
 
@@ -4294,7 +4347,11 @@ with c1:
     dv_birth = make_varga_bodies(core_birth_bodies, diamond_varga)
     dv_transit = make_varga_bodies(core_transit_bodies, diamond_varga)
     dv_asc = next(b for b in dv_birth if b["key"] == "As")
-    svg_diamond = build_svg_chart(dv_birth, dv_transit, dv_asc["sign"], show_nakshatra=_premium_for_limit)
+    svg_diamond = build_svg_chart(
+        dv_birth, dv_transit, dv_asc["sign"],
+        show_nakshatra=(_premium_for_limit and _chart_show_nak),
+        language=_chart_language, show_transits=_chart_show_transits,
+    )
     st.components.v1.html(
         f'<div style="display:flex;justify-content:center;">{svg_diamond}</div>', height=760
     )
@@ -4321,7 +4378,7 @@ with c2:
         unsafe_allow_html=True,
     )
     cv_birth = make_varga_bodies(core_birth_bodies, circular_varga)
-    cv_transit = make_varga_bodies(core_transit_bodies, circular_varga)
+    cv_transit = make_varga_bodies(core_transit_bodies, circular_varga) if _chart_show_transits else []
     cv_asc = next(b for b in cv_birth if b["key"] == "As")
     svg_circular = build_circular_svg_chart(
         cv_birth, cv_transit, cv_asc["sign"], cv_asc["inSign"]
@@ -4332,6 +4389,24 @@ with c2:
     if not _premium_for_limit:
         st.caption("⭐ Upgrade to Premium to unlock divisional charts (D2–D60) on the wheel too.")
     st.markdown("</div>", unsafe_allow_html=True)
+
+# ---- Chart display options (affect both charts above) ---------------------
+st.markdown('<div class="kcard">', unsafe_allow_html=True)
+opt1, opt2, opt3 = st.columns(3)
+with opt1:
+    st.checkbox(
+        "Show Nakṣatra", value=_chart_show_nak, key="chart_show_nakshatra",
+        disabled=not _premium_for_limit,
+        help=None if _premium_for_limit else "Premium feature — upgrade to enable.",
+    )
+with opt2:
+    st.radio(
+        "Kundali language", ["English", "Hindi"], key="chart_language",
+        index=["English", "Hindi"].index(_chart_language), horizontal=True,
+    )
+with opt3:
+    st.checkbox("Show Transits", value=_chart_show_transits, key="chart_show_transits")
+st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ---- Premium: paid Kundali report (PDF, with HTML fallback) ---------------
