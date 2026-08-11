@@ -1686,7 +1686,8 @@ def build_planetspath_solar_svg(size: int = 760) -> str:
     staying inside its column."""
     cx = cy = size / 2
     defs = []
-    parts = [f'<svg viewBox="0 0 {size} {size}" xmlns="http://www.w3.org/2000/svg" style="display:block;">']
+    parts = [f'<svg viewBox="0 0 {size} {size}" width="{size}" height="{size}" '
+             f'xmlns="http://www.w3.org/2000/svg" style="display:block;max-width:100%;height:auto;">']
 
     def pt(r, deg):
         rad = math.radians(deg - 90)
@@ -1713,17 +1714,17 @@ def build_planetspath_solar_svg(size: int = 760) -> str:
         parts.append(f'<circle cx="{cx}" cy="{cy}" r="{size*r_frac:.1f}" fill="none" stroke="#D8A845" '
                       f'stroke-width="1" stroke-dasharray="2,9" opacity="0.4"/>')
 
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{size*0.15:.1f}" fill="url(#ppOmGlow)"/>')
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{size*0.105:.1f}" fill="#FFFDF3" stroke="#B8842E" stroke-width="2"/>')
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{size*0.19:.1f}" fill="url(#ppOmGlow)"/>')
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{size*0.135:.1f}" fill="#FFFDF3" stroke="#B8842E" stroke-width="2.5"/>')
     OM_FONTS = ("'Noto Sans Devanagari','Nirmala UI','Kohinoor Devanagari',"
                 "'Devanagari Sangam MN','Mangal',sans-serif")
     parts.append(f'<text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="central" '
-                 f'font-size="{size*0.11:.1f}" fill="url(#ppOmGold)" font-family="{OM_FONTS}" '
+                 f'font-size="{size*0.145:.1f}" fill="url(#ppOmGold)" font-family="{OM_FONTS}" '
                  f'filter="url(#ppOmShadow)">\u0950</text>')
-    sx, sy = pt(size * 0.13, 0)
-    parts.append(f'<text x="{sx:.1f}" y="{sy:.1f}" text-anchor="middle" font-size="16" fill="#dfa72f">\u2726</text>')
-    sx2, sy2 = pt(size * 0.13, 180)
-    parts.append(f'<text x="{sx2:.1f}" y="{sy2:.1f}" text-anchor="middle" font-size="16" fill="#dfa72f">\u2726</text>')
+    sx, sy = pt(size * 0.165, 0)
+    parts.append(f'<text x="{sx:.1f}" y="{sy:.1f}" text-anchor="middle" font-size="20" fill="#dfa72f">\u2726</text>')
+    sx2, sy2 = pt(size * 0.165, 180)
+    parts.append(f'<text x="{sx2:.1f}" y="{sy2:.1f}" text-anchor="middle" font-size="20" fill="#dfa72f">\u2726</text>')
 
     for key, r_frac, angle, sz_frac, has_rings in POSTER_PLANET_LAYOUT:
         px, py = pt(size * r_frac, angle)
@@ -1780,7 +1781,8 @@ def render_planetspath_solar_with_features():
     rows_html = (
         f'<tr>{_cell(*f[0])}{_cell(*f[1])}{_cell(*f[2])}</tr>'
         f'<tr>{_cell(*f[3])}'
-        f'<td class="pp-grid-cell" style="text-align:center;vertical-align:middle;">{solar_svg}</td>'
+        f'<td class="pp-grid-cell pp-center-cell" style="text-align:center;vertical-align:middle;">'
+        f'<div style="width:100%;margin:0 auto;">{solar_svg}</div></td>'
         f'{_cell(*f[4])}</tr>'
         f'<tr>{_cell(*f[5])}{_cell(*f[6])}{_cell(*f[7])}</tr>'
     )
@@ -1788,7 +1790,8 @@ def render_planetspath_solar_with_features():
         f"""
         <style>
         .pp-solar-table {{ width:100%; border-collapse:separate; border-spacing:18px; table-layout:fixed; margin-top:10px; }}
-        .pp-grid-cell {{ width:33.33%; vertical-align:top; }}
+        .pp-grid-cell {{ width:27%; vertical-align:top; }}
+        .pp-center-cell {{ width:46%; }}
         .pp-mini-feature {{
             background:rgba(255,255,255,.92); border:1px solid #eadfca; border-radius:16px;
             padding:18px 20px; display:flex; align-items:center; gap:14px;
