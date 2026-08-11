@@ -1698,6 +1698,17 @@ def build_planetspath_solar_svg(size: int = 760) -> str:
         '<stop offset="70%" stop-color="#FFE9A8" stop-opacity="0.3"/>'
         '<stop offset="100%" stop-color="#FFE9A8" stop-opacity="0"/></radialGradient>'
     )
+    defs.append(
+        '<linearGradient id="ppOmGold" x1="0%" y1="0%" x2="100%" y2="100%">'
+        '<stop offset="0%" stop-color="#F5C244"/>'
+        '<stop offset="50%" stop-color="#C9910E"/>'
+        '<stop offset="100%" stop-color="#8B6508"/></linearGradient>'
+    )
+    defs.append(
+        '<filter id="ppOmShadow" x="-40%" y="-40%" width="180%" height="180%">'
+        '<feDropShadow dx="1.5" dy="2.5" stdDeviation="1.3" flood-color="#5C3A00" flood-opacity="0.45"/>'
+        '</filter>'
+    )
     for r_frac in (0.30, 0.44):
         parts.append(f'<circle cx="{cx}" cy="{cy}" r="{size*r_frac:.1f}" fill="none" stroke="#D8A845" '
                       f'stroke-width="1" stroke-dasharray="2,9" opacity="0.4"/>')
@@ -1707,7 +1718,8 @@ def build_planetspath_solar_svg(size: int = 760) -> str:
     OM_FONTS = ("'Noto Sans Devanagari','Nirmala UI','Kohinoor Devanagari',"
                 "'Devanagari Sangam MN','Mangal',sans-serif")
     parts.append(f'<text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="central" '
-                 f'font-size="{size*0.11:.1f}" fill="#B8842E" font-family="{OM_FONTS}">\u0950</text>')
+                 f'font-size="{size*0.11:.1f}" fill="url(#ppOmGold)" font-family="{OM_FONTS}" '
+                 f'filter="url(#ppOmShadow)">\u0950</text>')
     sx, sy = pt(size * 0.13, 0)
     parts.append(f'<text x="{sx:.1f}" y="{sy:.1f}" text-anchor="middle" font-size="16" fill="#dfa72f">\u2726</text>')
     sx2, sy2 = pt(size * 0.13, 180)
@@ -2048,6 +2060,90 @@ def graha_dignity(key: str, sign: int) -> str:
     if sign in OWN_SIGNS.get(key, set()):
         return "Own Sign"
     return "Neutral"
+
+
+# ============================================================
+# TRANSIT INSIGHTS — general educational context for the Current Transit
+# table, NOT personalized predictions. Combines: (1) what this graha's
+# transits generally influence, (2) how its current sign-dignity colours
+# that, (3) the nakshatra's classical deity/symbol flavour, and (4) any
+# other grahas currently conjunct (sharing the same sign) it right now.
+# ============================================================
+
+GRAHA_TRANSIT_THEME = {
+    "Su": "The Sun's transits generally highlight vitality, self-expression, authority, "
+          "recognition, and how confidently you present yourself to the world.",
+    "Mo": "The Moon moves fastest of all — its transits colour the emotional tone, mind, "
+          "instincts, and domestic/comfort matters of roughly two and a half days at a time.",
+    "Ma": "Mars's transits generally influence energy, drive, courage, conflict, and "
+          "how assertively action gets taken during this period.",
+    "Me": "Mercury's transits generally shape communication, intellect, commerce, travel, "
+          "and how clearly (or not) ideas and information move during this period.",
+    "Jp": "Jupiter's transits generally bring expansion, growth, opportunity, wisdom, and "
+          "optimism to whatever area of life it's currently touching.",
+    "Ve": "Venus's transits generally influence relationships, aesthetics, comfort, finances, "
+          "and harmony (or friction) in matters of love and pleasure.",
+    "Sa": "Saturn's transits generally bring discipline, structure, delay, and long-term "
+          "consequence — themes that build slowly rather than arriving quickly.",
+    "Ra": "Rahu's transits generally amplify ambition, unconventional paths, obsession, and "
+          "a hunger for things outside one's usual comfort zone.",
+    "Ke": "Ketu's transits generally bring detachment, introspection, and a pull away from "
+          "material engagement toward spiritual or inward-facing themes.",
+}
+
+DIGNITY_EFFECT_NOTE = {
+    "Exalted": "It's currently exalted here — classically its strongest possible placement, "
+               "so its themes tend to express in an amplified, confident, favourable way.",
+    "Own Sign": "It's currently in its own sign — a stable, comfortable placement where it "
+                "tends to express its themes steadily and with self-assurance.",
+    "Neutral": "It's currently in a sign that's neither especially strong nor weak for it — "
+               "effects tend to be moderate and more dependent on other chart factors.",
+    "Debilitated": "It's currently debilitated here — classically its most challenged "
+                   "placement, so its themes may express with more friction or require "
+                   "extra conscious effort to work well.",
+}
+
+
+def compute_transit_conjunctions(transit_bodies: list) -> dict:
+    """For each graha, returns the list of other graha keys currently sharing
+    its sign (a real, directly-computable technique — Graha Yuti/conjunction —
+    as opposed to the more speculative parts of transit reading)."""
+    by_sign = {}
+    for b in transit_bodies:
+        if b["key"] == "As":
+            continue
+        by_sign.setdefault(b["sign"], []).append(b["key"])
+    result = {}
+    for b in transit_bodies:
+        if b["key"] == "As":
+            continue
+        others = [k for k in by_sign.get(b["sign"], []) if k != b["key"]]
+        result[b["key"]] = others
+    return result
+
+
+def build_transit_insight(b: dict, conjunctions: list) -> str:
+    """Combines theme + dignity + nakshatra flavour + conjunctions into one
+    short educational paragraph for a single graha's current transit."""
+    key, sign, nak_idx = b["key"], b["sign"], b["nakIdx"]
+    dignity = graha_dignity(key, sign)
+    parts = [GRAHA_TRANSIT_THEME[key], DIGNITY_EFFECT_NOTE[dignity]]
+    parts.append(
+        f"Its current nakshatra, {NAKSHATRAS_ASCII[nak_idx]}, carries the classical flavour "
+        f"of {NAKSHATRA_DEITY_ASCII[nak_idx]} and is symbolised by the {NAKSHATRA_SYMBOL_ASCII[nak_idx]} — "
+        f"a subtle undertone on top of the sign-level theme above."
+    )
+    if conjunctions:
+        names = ", ".join(BODY_FULLNAME_ASCII.get(k, k) for k in conjunctions)
+        parts.append(
+            f"It's also currently conjunct (sharing the same sign as) {names} — when grahas "
+            f"transit together like this, their themes tend to blend and interact rather than "
+            f"play out independently."
+        )
+    else:
+        parts.append("No other graha currently shares its sign, so its themes are playing out "
+                      "on their own right now rather than blending with another planet's.")
+    return " ".join(parts)
 
 
 def nakshatra_lord_relationship_note(graha_key: str, nak_idx: int) -> str:
@@ -3637,20 +3733,20 @@ def build_strength_radar_svg(scores: dict, size: int = 220) -> str:
 def render_dashboard_hero(username: str):
     """Personalized welcome banner reusing the login page's solar-system
     graphic, so the same visual identity carries through post-login."""
-    solar_svg = build_planetspath_solar_svg(420)
+    solar_svg = build_planetspath_solar_svg(480)
     st.markdown(
         f"""
         <div style="position:relative; background:{C['panel']}; border:1px solid {C['line']};
-            border-radius:18px; padding:20px 24px; margin-bottom:18px; overflow:hidden;
-            display:flex; align-items:center; gap:20px;">
-            <div style="flex:1; z-index:2;">
-                <p style="font-family:Georgia,serif; font-size:26px; color:{C['ivory']}; margin:0 0 8px;">
+            border-radius:18px; padding:18px 24px; margin-bottom:16px; overflow:hidden;
+            display:flex; align-items:center; gap:14px;">
+            <div style="flex:0 0 30%; z-index:2;">
+                <p style="font-family:Georgia,serif; font-size:25px; color:{C['ivory']}; margin:0 0 6px;">
                     Welcome back, {username}!</p>
-                <div style="width:70px;height:2px;background:{C['gold']};margin:10px 0 14px;"></div>
-                <p style="font-family:Georgia,serif; font-style:italic; color:{C['muted']}; font-size:15px; margin:0;">
+                <div style="width:60px;height:2px;background:{C['gold']};margin:8px 0 12px;"></div>
+                <p style="font-family:Georgia,serif; font-style:italic; color:{C['muted']}; font-size:14px; margin:0;">
                     The planets move in their path,<br>and so does your destiny.</p>
             </div>
-            <div style="flex-shrink:0; width:220px; opacity:0.9;">{solar_svg}</div>
+            <div style="flex:1 1 70%; max-width:560px; margin:0 auto;">{solar_svg}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -3740,6 +3836,7 @@ st.markdown(
     .stAppDeployButton {{ display: none; }}
     div[data-testid="stStatusWidget"] {{ visibility: hidden; }}
     a[href*="streamlit.io"] {{ display: none !important; }}
+    .block-container {{ padding-top: 1rem !important; }}
 
     .stApp {{ background-color: {C["bg"]}; color: {C["ivory"]}; font-size: 17px; }}
     .kcard {{
@@ -4194,6 +4291,23 @@ if is_premium(user_id):
         f'<p class="kmuted" style="font-size:12px;margin-top:8px;">'
         "℞ = retrograde.</p>",
         unsafe_allow_html=True,
+    )
+
+    st.markdown(f'<p style="color:{C["gold"]};font-weight:700;margin-top:18px;">Transit Insights</p>', unsafe_allow_html=True)
+    _conjunctions = compute_transit_conjunctions(core_transit_bodies)
+    for b in core_transit_bodies:
+        if b["key"] == "As":
+            continue
+        retro = " ℞" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
+        with st.expander(
+            f'{b["key"]} — {BODY_FULLNAME_ASCII.get(b["key"], b["key"])} in {SIGNS[b["sign"]]}{retro} '
+            f'({NAKSHATRAS[b["nakIdx"]]})'
+        ):
+            st.markdown(build_transit_insight(b, _conjunctions.get(b["key"], [])))
+    st.caption(
+        "⚠️ General, educational context about the current sky — not a personalised prediction. "
+        "A full transit reading also weighs your natal chart (which houses these transits activate "
+        "for you specifically), classical aspects (drishti) between planets, and more."
     )
 
     st.markdown("</div>", unsafe_allow_html=True)
