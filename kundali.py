@@ -1766,7 +1766,7 @@ def render_planetspath_solar_with_features():
     rendering tools. Replaces the old layout of a solar graphic with a
     separate feature row below it, which left the space around the planets
     empty. No chevron arrows — these are informational, not links."""
-    solar_svg = build_planetspath_solar_svg(480)
+    solar_svg = build_planetspath_solar_svg(620)
 
     def _cell(icon, title, desc):
         return (
@@ -1787,20 +1787,20 @@ def render_planetspath_solar_with_features():
     st.markdown(
         f"""
         <style>
-        .pp-solar-table {{ width:100%; border-collapse:separate; border-spacing:12px; table-layout:fixed; margin-top:8px; }}
+        .pp-solar-table {{ width:100%; border-collapse:separate; border-spacing:18px; table-layout:fixed; margin-top:10px; }}
         .pp-grid-cell {{ width:33.33%; vertical-align:top; }}
         .pp-mini-feature {{
-            background:rgba(255,255,255,.92); border:1px solid #eadfca; border-radius:14px;
-            padding:12px 14px; display:flex; align-items:center; gap:10px;
-            box-shadow:0 2px 8px rgba(104,82,40,.06); min-height:74px;
+            background:rgba(255,255,255,.92); border:1px solid #eadfca; border-radius:16px;
+            padding:18px 20px; display:flex; align-items:center; gap:14px;
+            box-shadow:0 2px 8px rgba(104,82,40,.06); min-height:104px;
         }}
         .pp-mini-icon {{
-            width:36px; height:36px; border:1px solid #e8bd65; border-radius:50%;
-            display:flex; align-items:center; justify-content:center; font-size:16px; color:#d28c16;
+            width:50px; height:50px; border:1px solid #e8bd65; border-radius:50%;
+            display:flex; align-items:center; justify-content:center; font-size:23px; color:#d28c16;
             flex-shrink:0; background:linear-gradient(145deg,#fff,#fffaf0);
         }}
-        .pp-mini-title {{ color:#1b3158; font-weight:700; font-size:12px; letter-spacing:0.01em; margin-bottom:3px; }}
-        .pp-mini-text {{ color:#59657a; font-size:10.5px; line-height:1.3; }}
+        .pp-mini-title {{ color:#1b3158; font-weight:700; font-size:16px; letter-spacing:0.01em; margin-bottom:5px; }}
+        .pp-mini-text {{ color:#59657a; font-size:13.5px; line-height:1.4; }}
         </style>
         <table class="pp-solar-table"><tbody>{rows_html}</tbody></table>
         """,
