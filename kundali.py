@@ -4528,8 +4528,27 @@ if is_premium(user_id):
         )
 
     else:
-        hora_date = st.date_input("Date", value=date.today(), key="hora_date")
-        hora = compute_hora_table(hora_date.year, hora_date.month, hora_date.day, lat, lon, tz)
+        hcol_date, hcol_place = st.columns([1, 1.5])
+        with hcol_date:
+            hora_date = st.date_input("Date", value=date.today(), key="hora_date")
+        with hcol_place:
+            hora_city_query = st.text_input(
+                "Location", value=form["city"][0], key="hora_city_query",
+                help="Hora timings depend on sunrise/sunset, which vary by place.",
+            )
+            hora_matches = [c for c in CITIES if hora_city_query.lower() in (c[0] + " " + c[1]).lower()]
+            if not hora_matches:
+                hora_matches = CITIES[:8]
+            hora_labels = [f"{c[0]} \u00b7 {c[1]}" for c in hora_matches[:8]]
+            hora_chosen_label = st.selectbox("Match", hora_labels, key="hora_city_sel", label_visibility="collapsed")
+            hora_city = hora_matches[hora_labels.index(hora_chosen_label)]
+        hora_lat, hora_lon, hora_tz = hora_city[2], hora_city[3], hora_city[4]
+        st.caption(
+            f"{abs(hora_lat):.2f}\u00b0{'N' if hora_lat >= 0 else 'S'}, "
+            f"{abs(hora_lon):.2f}\u00b0{'E' if hora_lon >= 0 else 'W'} \u00b7 "
+            f"UTC{'+' if hora_tz >= 0 else ''}{hora_tz}"
+        )
+        hora = compute_hora_table(hora_date.year, hora_date.month, hora_date.day, hora_lat, hora_lon, hora_tz)
         EFF_COLOR = {
             "Most-effective": "#1E8E3E", "Detrimental": "#C4462B",
             "Less-effective": "#1A73E8", "Neutral": C["ivory"],
