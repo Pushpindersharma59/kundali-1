@@ -4247,6 +4247,11 @@ def render_nakshatra_live_clock(lat: float, lon: float, tz: float):
             var r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
             return 'rgba(' + r + ',' + g + ',' + b + ',0.16)';
         }}
+        var THEME_BG = '#FFF3B0';
+        var THEME_BG_SOFT = '#FFF9C4';
+        var THEME_ACCENT = '#B8842E';
+        var THEME_TEXT = '#3A2E1F';
+        var THEME_MUTED = '#7A6F5C';
         function dm(deg) {{
             var d = Math.floor(deg), m = Math.round((deg - d) * 60);
             if (m === 60) {{ d += 1; m = 0; }}
@@ -4262,55 +4267,52 @@ def render_nakshatra_live_clock(lat: float, lon: float, tz: float):
             var out = document.getElementById('nak-live');
             var fmt = {{ hour:'numeric', minute:'2-digit', second:'2-digit' }};
             var fmtNow = {{ weekday:'long', month:'short', day:'numeric', hour:'numeric', minute:'2-digit', second:'2-digit' }};
-            var nowLine = '<div style="font-size:14px;color:#7A6F5C;margin-bottom:14px;font-family:Arial,sans-serif;">' +
+            var nowLine = '<div style="font-size:16px;color:' + THEME_MUTED + ';margin-bottom:16px;font-family:Arial,sans-serif;">' +
                 now.toLocaleString('en-US', fmtNow) + ' &middot; updates live</div>';
 
-            var moonCol = COLORS['Mo'] || '#7EC8E3';
             var isKrishna = DATA.paksha === 'Krishna';
             var tithiHtml = '';
             if (DATA.tithi_start_iso && DATA.tithi_end_iso) {{
                 var ts = new Date(DATA.tithi_start_iso), te = new Date(DATA.tithi_end_iso);
                 var frac = Math.min(1, Math.max(0, (now - ts) / (te - ts)));
                 var illum = Math.round(frac * 100);
-                tithiHtml = '<div style="display:flex;align-items:center;gap:14px;border-radius:12px;' +
-                  'padding:14px 18px;margin-bottom:16px;background:' + bgTint(moonCol) + ';">' +
-                  '<div>' + moonSvg(36, isKrishna ? '#EDE3F8' : '#FFF3C4', moonCol) + '</div>' +
-                  '<div><div style="font-size:18px;font-weight:700;color:#3A2E1F;">' + DATA.tithi_name + '</div>' +
-                  '<div style="font-size:13px;color:#7A6F5C;margin-top:2px;font-family:Arial,sans-serif;">' +
+                tithiHtml = '<div style="display:flex;align-items:center;gap:16px;border-radius:12px;' +
+                  'padding:16px 20px;margin-bottom:18px;background:' + THEME_BG_SOFT + ';border:1px solid ' + THEME_BG + ';">' +
+                  '<div>' + moonSvg(40, THEME_BG, THEME_ACCENT) + '</div>' +
+                  '<div><div style="font-size:21px;font-weight:700;color:' + THEME_TEXT + ';">' + DATA.tithi_name + '</div>' +
+                  '<div style="font-size:15px;color:' + THEME_MUTED + ';margin-top:2px;font-family:Arial,sans-serif;">' +
                   DATA.paksha + ' Paksha</div></div>' +
-                  '<div style="margin-left:auto;text-align:right;font-size:13px;color:#7A6F5C;font-family:Arial,sans-serif;">' +
-                  '<span style="font-size:20px;font-weight:700;color:#3A2E1F;display:block;">' + illum + '%</span>elapsed</div></div>';
+                  '<div style="margin-left:auto;text-align:right;font-size:15px;color:' + THEME_MUTED + ';font-family:Arial,sans-serif;">' +
+                  '<span style="font-size:24px;font-weight:700;color:' + THEME_TEXT + ';display:block;">' + illum + '%</span>elapsed</div></div>';
             }}
 
-            var nakCol = COLORS[DATA.lord_key] || '#B8842E';
             var ns = new Date(DATA.nak_start_iso), ne = new Date(DATA.nak_end_iso);
             var quarterMs = (ne - ns) / 4;
             var padaIdx = Math.min(3, Math.max(0, Math.floor((now - ns) / quarterMs)));
             var padaEnd = new Date(ns.getTime() + (padaIdx + 1) * quarterMs);
             var padasHtml = DATA.padas.map(function(p, i) {{
                 var cur = i === padaIdx;
-                var col = COLORS[p.lord_key] || '#B8842E';
                 var pStart = new Date(p.start_iso), pEnd = new Date(p.end_iso);
-                return '<div style="border-radius:12px;padding:14px;position:relative;' +
-                  'opacity:' + (cur ? '1' : '0.55') + ';background:' + bgTint(col) +
-                  (cur ? ';border:2px solid ' + col : ';border:2px solid transparent') + ';">' +
-                  (cur ? '<div style="position:absolute;top:10px;right:10px;">' + moonSvg(18, '#fff', col) + '</div>' : '') +
-                  '<div style="font-size:11px;text-transform:uppercase;color:' + col + ';font-family:Arial,sans-serif;">Pada ' + (i+1) + (cur ? ' &middot; now' : '') + '</div>' +
-                  '<div style="font-size:16px;font-weight:700;margin:5px 0;color:#3A2E1F;">' + p.sign + '</div>' +
-                  '<div style="font-size:11px;opacity:0.8;margin-bottom:3px;color:#7A6F5C;font-family:Arial,sans-serif;">Ruled by ' + p.lord + '</div>' +
-                  '<div style="font-size:11.5px;color:#7A6F5C;font-family:Arial,sans-serif;">' + dm(p.deg_start) + '\\u2013' + dm(p.deg_end) + '</div>' +
-                  '<div style="font-size:11.5px;color:#7A6F5C;font-family:Arial,sans-serif;">' + pStart.toLocaleTimeString('en-US', fmt) + '\\u2013' + pEnd.toLocaleTimeString('en-US', fmt) + '</div>' +
-                  '</div>';
+                return '<td style="width:25%;padding:0 6px;vertical-align:top;"><div style="border-radius:12px;padding:16px;position:relative;' +
+                  'opacity:' + (cur ? '1' : '0.7') + ';background:' + (cur ? THEME_BG : THEME_BG_SOFT) +
+                  (cur ? ';border:2px solid ' + THEME_ACCENT : ';border:2px solid transparent') + ';">' +
+                  (cur ? '<div style="position:absolute;top:10px;right:10px;">' + moonSvg(20, '#fff', THEME_ACCENT) + '</div>' : '') +
+                  '<div style="font-size:13px;text-transform:uppercase;color:' + THEME_ACCENT + ';font-family:Arial,sans-serif;font-weight:700;">Pada ' + (i+1) + (cur ? ' &middot; now' : '') + '</div>' +
+                  '<div style="font-size:19px;font-weight:700;margin:6px 0;color:' + THEME_TEXT + ';">' + p.sign + '</div>' +
+                  '<div style="font-size:13px;opacity:0.85;margin-bottom:4px;color:' + THEME_MUTED + ';font-family:Arial,sans-serif;">Ruled by ' + p.lord + '</div>' +
+                  '<div style="font-size:13.5px;color:' + THEME_MUTED + ';font-family:Arial,sans-serif;">' + dm(p.deg_start) + '\\u2013' + dm(p.deg_end) + '</div>' +
+                  '<div style="font-size:13.5px;color:' + THEME_MUTED + ';font-family:Arial,sans-serif;">' + pStart.toLocaleTimeString('en-US', fmt) + '\\u2013' + pEnd.toLocaleTimeString('en-US', fmt) + '</div>' +
+                  '</div></td>';
             }}).join('');
 
             out.innerHTML = nowLine + tithiHtml +
-              '<div style="display:inline-block;border-radius:12px;padding:16px 24px;margin-bottom:10px;' +
-              'font-size:30px;font-weight:700;background:' + bgTint(nakCol) + ';color:#3A2E1F;">' + DATA.nakshatra + '</div><br>' +
-              '<span style="display:inline-block;font-size:13px;padding:5px 14px;border-radius:8px;' +
-              'background:' + bgTint(nakCol) + ';color:#3A2E1F;font-family:Arial,sans-serif;">Nakshatra ' + DATA.nak_num +
+              '<div style="display:inline-block;border-radius:12px;padding:18px 26px;margin-bottom:12px;' +
+              'font-size:34px;font-weight:700;background:' + THEME_BG + ';color:' + THEME_TEXT + ';">' + DATA.nakshatra + '</div><br>' +
+              '<span style="display:inline-block;font-size:15px;padding:6px 16px;border-radius:8px;' +
+              'background:' + THEME_BG_SOFT + ';border:1px solid ' + THEME_BG + ';color:' + THEME_TEXT + ';font-family:Arial,sans-serif;">Nakshatra ' + DATA.nak_num +
               ' / 27 &middot; ' + DATA.rashi + ' ' + dm(DATA.deg_start) + '\\u2013' + dm(DATA.deg_end) + ' &middot; lord ' + DATA.lord + '</span>' +
-              '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0;">' + padasHtml + '</div>' +
-              '<div style="font-size:13px;color:#5F5E5A;margin-top:6px;line-height:1.6;font-family:Arial,sans-serif;">' +
+              '<table style="width:100%;border-collapse:separate;border-spacing:0;margin:18px 0;table-layout:fixed;"><tr>' + padasHtml + '</tr></table>' +
+              '<div style="font-size:15px;color:' + THEME_MUTED + ';margin-top:8px;line-height:1.65;font-family:Arial,sans-serif;">' +
               'Currently in pada ' + (padaIdx+1) + ', running until ' + padaEnd.toLocaleTimeString('en-US', fmt) +
               '. Presided over by ' + DATA.deity + '. Traits: ' + DATA.traits + '.</div>';
         }}
@@ -4319,7 +4321,7 @@ def render_nakshatra_live_clock(lat: float, lon: float, tz: float):
     }})();
     </script>
     """
-    st.components.v1.html(html, height=430, scrolling=False)
+    st.components.v1.html(html, height=470, scrolling=False)
 
 
 # ============================================================
