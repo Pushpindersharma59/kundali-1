@@ -250,6 +250,127 @@ def jd_to_local_date_str(jd: float, tz: float) -> str:
     return local_dt.strftime("%d %b %Y")
 
 
+def jd_to_utc_datetime(jd: float) -> datetime:
+    """Julian Day -> a plain (naive, UTC) Python datetime."""
+    return datetime(2000, 1, 1) + timedelta(days=(jd - julian_day(2000, 1, 1, 0.0)))
+
+
+def find_tithi_transition_jd(jd0: float, current_tithi_idx: int, search_forward: bool):
+    """Same bisection idea as find_nakshatra_transition_jd, but tracking the
+    tithi index (Sun-Moon elongation // 12°) instead of a graha's nakshatra —
+    the tithi changes roughly once a day, so a small fixed step works fine."""
+    step = 0.05 * (1 if search_forward else -1)  # ~72 minutes per coarse step
+    n_steps = int(3 / 0.05)  # 3-day safety window either side
+    jd_same = jd0
+
+    def _tithi_idx(jd):
+        elong = norm360(moon_longitude(jd) - sun_longitude(jd))
+        return int(elong // 12) % 30
+
+    for i in range(1, n_steps + 1):
+        jd_probe = jd0 + step * i
+        idx_probe = _tithi_idx(jd_probe)
+        if idx_probe != current_tithi_idx:
+            lo, hi = (jd_same, jd_probe) if search_forward else (jd_probe, jd_same)
+            for _ in range(40):
+                mid = (lo + hi) / 2
+                if _tithi_idx(mid) == current_tithi_idx:
+                    lo = mid
+                else:
+                    hi = mid
+            return hi if search_forward else lo
+        jd_same = jd_probe
+    return None
+
+
+NAKSHATRA_TRAITS_ASCII = [
+    "swift, healing, pioneering", "restraining, transformative, intense",
+    "sharp, purifying, determined", "growth-oriented, sensual, creative",
+    "searching, gentle, curious", "stormy, transformative, emotional",
+    "renewing, nurturing, optimistic", "nourishing, protective, disciplined",
+    "intense, penetrating, secretive", "authoritative, traditional, ambitious",
+    "pleasure-loving, creative, sociable", "generous, dependable, kind",
+    "skillful, clever, resourceful", "brilliant, artistic, charismatic",
+    "independent, flexible, diplomatic", "goal-driven, determined, competitive",
+    "devoted, cooperative, balanced", "protective, responsible, courageous",
+    "investigative, root-seeking, intense", "invincible, proud, persuasive",
+    "enduring, principled, victorious", "attentive, learned, connective",
+    "wealthy, rhythmic, ambitious", "healing, secretive, unconventional",
+    "intense, transformative, passionate", "wise, deep, spiritually mature",
+    "nurturing, compassionate, transitional",
+]
+
+
+def compute_nakshatra_live_data(lat: float, lon: float, tz: float) -> dict:
+    """Everything the live nakshatra-clock widget needs, computed fresh from
+    real ephemeris for right now — no hardcoded date window, works for any
+    moment. Boundary timestamps are returned as ISO strings (in the given
+    UTC offset) so client-side JS can interpolate a live-ticking display
+    between them without any further server round-trips."""
+    now_local = now_in_city(tz)
+    jd_now = julian_day(now_local.year, now_local.month, now_local.day,
+                         now_local.hour + now_local.minute / 60 + now_local.second / 3600 - tz)
+
+    moon_lon_trop = moon_longitude(jd_now)
+    sun_lon_trop = sun_longitude(jd_now)
+    ayan = ayanamsa(jd_now)
+    moon_sid = norm360(moon_lon_trop - ayan)
+    nak_idx = int(moon_sid // NAK_SPAN) % 27
+    nak_sign = int(moon_sid // 30)
+
+    nak_entry_jd, nak_exit_jd = compute_nakshatra_transit_window("Mo", jd_now, nak_idx)
+    if nak_entry_jd is None or nak_exit_jd is None:
+        return {"ok": False}
+
+    elong = norm360(moon_lon_trop - sun_lon_trop)
+    tithi_idx = int(elong // 12) % 30
+    tithi_entry_jd = find_tithi_transition_jd(jd_now, tithi_idx, search_forward=False)
+    tithi_exit_jd = find_tithi_transition_jd(jd_now, tithi_idx, search_forward=True)
+    paksha = "Krishna" if tithi_idx >= 15 else "Shukla"
+    local_tithi_idx = tithi_idx if tithi_idx < 15 else tithi_idx - 15
+    if local_tithi_idx == 14:
+        tithi_name = "Purnima" if paksha == "Shukla" else "Amavasya"
+    else:
+        tithi_name = TITHIS_ASCII[local_tithi_idx]
+
+    nak_start_lon = nak_idx * NAK_SPAN
+    pada_span = NAK_SPAN / 4
+    padas = []
+    for i in range(4):
+        p_start_jd = nak_entry_jd + i * (nak_exit_jd - nak_entry_jd) / 4
+        p_end_jd = nak_entry_jd + (i + 1) * (nak_exit_jd - nak_entry_jd) / 4
+        p_start_lon = norm360(nak_start_lon + i * pada_span)
+        p_end_lon = norm360(nak_start_lon + (i + 1) * pada_span)
+        p_mid_lon = norm360(nak_start_lon + (i + 0.5) * pada_span)
+        p_sign = navamsa_sign(p_mid_lon)
+        p_lord_key = RASHI_LORD.get(p_sign, "Su")
+        padas.append({
+            "sign": SIGNS_ASCII[p_sign], "lord": BODY_FULLNAME_ASCII.get(p_lord_key, p_lord_key),
+            "lord_key": p_lord_key,
+            "deg_start": round(p_start_lon % 30, 2), "deg_end": round(p_end_lon % 30 or 30, 2),
+            "start_iso": (jd_to_utc_datetime(p_start_jd) + timedelta(hours=tz)).isoformat(),
+            "end_iso": (jd_to_utc_datetime(p_end_jd) + timedelta(hours=tz)).isoformat(),
+        })
+
+    return {
+        "ok": True,
+        "nakshatra": NAKSHATRAS_ASCII[nak_idx], "nak_num": nak_idx + 1,
+        "rashi": SIGNS_ASCII[nak_sign],
+        "deg_start": round(nak_start_lon % 30, 2), "deg_end": round((nak_start_lon + NAK_SPAN) % 30 or 30, 2),
+        "lord": BODY_FULLNAME_ASCII.get(DASHA_LORD_SHORT[nak_idx % 9], DASHA_LORD_SHORT[nak_idx % 9]),
+        "lord_key": DASHA_LORD_SHORT[nak_idx % 9],
+        "deity": NAKSHATRA_DEITY_ASCII[nak_idx], "traits": NAKSHATRA_TRAITS_ASCII[nak_idx],
+        "nak_start_iso": (jd_to_utc_datetime(nak_entry_jd) + timedelta(hours=tz)).isoformat(),
+        "nak_end_iso": (jd_to_utc_datetime(nak_exit_jd) + timedelta(hours=tz)).isoformat(),
+        "tithi_name": tithi_name, "paksha": paksha,
+        "tithi_start_iso": (jd_to_utc_datetime(tithi_entry_jd) + timedelta(hours=tz)).isoformat() if tithi_entry_jd else None,
+        "tithi_end_iso": (jd_to_utc_datetime(tithi_exit_jd) + timedelta(hours=tz)).isoformat() if tithi_exit_jd else None,
+        "elong": round(elong, 2),
+        "padas": padas,
+        "tz": tz,
+    }
+
+
 def ascendant(jd: float, lat_deg: float, lon_deg: float) -> float:
     T = (jd - 2451545.0) / 36525
     gmst = norm360(280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * T * T)
@@ -4096,6 +4217,111 @@ def render_todays_snapshot(lat: float, lon: float, tz: float, city_name: str):
     )
 
 
+def render_nakshatra_live_clock(lat: float, lon: float, tz: float):
+    """A self-updating 'live clock' card: current tithi, current nakshatra
+    with its 4 padas, and a live-ticking indicator of which pada is active
+    right now. The Python side computes real boundary timestamps (via the
+    app's own ephemeris — no hardcoded date window, works for any day);
+    a small client-side script then just interpolates the current moment
+    against those real boundaries once a second, so the display stays live
+    without repeated server round-trips."""
+    data = compute_nakshatra_live_data(lat, lon, tz)
+    if not data.get("ok"):
+        st.info("Live nakshatra clock is temporarily unavailable for this location/time.")
+        return
+
+    import json as _json
+    data_json = _json.dumps(data)
+    planet_colors_json = _json.dumps(PLANET_TRANSIT_COLORS)
+
+    html = f"""
+    <div style="font-family:Georgia,'Times New Roman',serif;">
+    <div id="nak-live"></div>
+    </div>
+    <script>
+    (function() {{
+        var DATA = {data_json};
+        var COLORS = {planet_colors_json};
+        function hexFg(hex) {{ return hex; }}
+        function bgTint(hex) {{
+            var r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+            return 'rgba(' + r + ',' + g + ',' + b + ',0.16)';
+        }}
+        function dm(deg) {{
+            var d = Math.floor(deg), m = Math.round((deg - d) * 60);
+            if (m === 60) {{ d += 1; m = 0; }}
+            return d + '\\u00b0' + (m < 10 ? '0' : '') + m + "'";
+        }}
+        function moonSvg(size, light, dark) {{
+            return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24">' +
+              '<circle cx="12" cy="12" r="11" fill="' + light + '"/>' +
+              '<path d="M12 1a11 11 0 0 1 0 22 8.5 11 0 0 0 0-22Z" fill="' + dark + '"/></svg>';
+        }}
+        function render() {{
+            var now = new Date();
+            var out = document.getElementById('nak-live');
+            var fmt = {{ hour:'numeric', minute:'2-digit', second:'2-digit' }};
+            var fmtNow = {{ weekday:'long', month:'short', day:'numeric', hour:'numeric', minute:'2-digit', second:'2-digit' }};
+            var nowLine = '<div style="font-size:14px;color:#7A6F5C;margin-bottom:14px;font-family:Arial,sans-serif;">' +
+                now.toLocaleString('en-US', fmtNow) + ' &middot; updates live</div>';
+
+            var moonCol = COLORS['Mo'] || '#7EC8E3';
+            var isKrishna = DATA.paksha === 'Krishna';
+            var tithiHtml = '';
+            if (DATA.tithi_start_iso && DATA.tithi_end_iso) {{
+                var ts = new Date(DATA.tithi_start_iso), te = new Date(DATA.tithi_end_iso);
+                var frac = Math.min(1, Math.max(0, (now - ts) / (te - ts)));
+                var illum = Math.round(frac * 100);
+                tithiHtml = '<div style="display:flex;align-items:center;gap:14px;border-radius:12px;' +
+                  'padding:14px 18px;margin-bottom:16px;background:' + bgTint(moonCol) + ';">' +
+                  '<div>' + moonSvg(36, isKrishna ? '#EDE3F8' : '#FFF3C4', moonCol) + '</div>' +
+                  '<div><div style="font-size:18px;font-weight:700;color:#3A2E1F;">' + DATA.tithi_name + '</div>' +
+                  '<div style="font-size:13px;color:#7A6F5C;margin-top:2px;font-family:Arial,sans-serif;">' +
+                  DATA.paksha + ' Paksha</div></div>' +
+                  '<div style="margin-left:auto;text-align:right;font-size:13px;color:#7A6F5C;font-family:Arial,sans-serif;">' +
+                  '<span style="font-size:20px;font-weight:700;color:#3A2E1F;display:block;">' + illum + '%</span>elapsed</div></div>';
+            }}
+
+            var nakCol = COLORS[DATA.lord_key] || '#B8842E';
+            var ns = new Date(DATA.nak_start_iso), ne = new Date(DATA.nak_end_iso);
+            var quarterMs = (ne - ns) / 4;
+            var padaIdx = Math.min(3, Math.max(0, Math.floor((now - ns) / quarterMs)));
+            var padaEnd = new Date(ns.getTime() + (padaIdx + 1) * quarterMs);
+            var padasHtml = DATA.padas.map(function(p, i) {{
+                var cur = i === padaIdx;
+                var col = COLORS[p.lord_key] || '#B8842E';
+                var pStart = new Date(p.start_iso), pEnd = new Date(p.end_iso);
+                return '<div style="border-radius:12px;padding:14px;position:relative;' +
+                  'opacity:' + (cur ? '1' : '0.55') + ';background:' + bgTint(col) +
+                  (cur ? ';border:2px solid ' + col : ';border:2px solid transparent') + ';">' +
+                  (cur ? '<div style="position:absolute;top:10px;right:10px;">' + moonSvg(18, '#fff', col) + '</div>' : '') +
+                  '<div style="font-size:11px;text-transform:uppercase;color:' + col + ';font-family:Arial,sans-serif;">Pada ' + (i+1) + (cur ? ' &middot; now' : '') + '</div>' +
+                  '<div style="font-size:16px;font-weight:700;margin:5px 0;color:#3A2E1F;">' + p.sign + '</div>' +
+                  '<div style="font-size:11px;opacity:0.8;margin-bottom:3px;color:#7A6F5C;font-family:Arial,sans-serif;">Ruled by ' + p.lord + '</div>' +
+                  '<div style="font-size:11.5px;color:#7A6F5C;font-family:Arial,sans-serif;">' + dm(p.deg_start) + '\\u2013' + dm(p.deg_end) + '</div>' +
+                  '<div style="font-size:11.5px;color:#7A6F5C;font-family:Arial,sans-serif;">' + pStart.toLocaleTimeString('en-US', fmt) + '\\u2013' + pEnd.toLocaleTimeString('en-US', fmt) + '</div>' +
+                  '</div>';
+            }}).join('');
+
+            out.innerHTML = nowLine + tithiHtml +
+              '<div style="display:inline-block;border-radius:12px;padding:16px 24px;margin-bottom:10px;' +
+              'font-size:30px;font-weight:700;background:' + bgTint(nakCol) + ';color:#3A2E1F;">' + DATA.nakshatra + '</div><br>' +
+              '<span style="display:inline-block;font-size:13px;padding:5px 14px;border-radius:8px;' +
+              'background:' + bgTint(nakCol) + ';color:#3A2E1F;font-family:Arial,sans-serif;">Nakshatra ' + DATA.nak_num +
+              ' / 27 &middot; ' + DATA.rashi + ' ' + dm(DATA.deg_start) + '\\u2013' + dm(DATA.deg_end) + ' &middot; lord ' + DATA.lord + '</span>' +
+              '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0;">' + padasHtml + '</div>' +
+              '<div style="font-size:13px;color:#5F5E5A;margin-top:6px;line-height:1.6;font-family:Arial,sans-serif;">' +
+              'Currently in pada ' + (padaIdx+1) + ', running until ' + padaEnd.toLocaleTimeString('en-US', fmt) +
+              '. Presided over by ' + DATA.deity + '. Traits: ' + DATA.traits + '.</div>';
+        }}
+        render();
+        setInterval(render, 1000);
+    }})();
+    </script>
+    """
+    st.components.v1.html(html, height=430, scrolling=False)
+
+
 # ============================================================
 # STREAMLIT APP
 # ============================================================
@@ -4247,6 +4473,10 @@ if is_premium(st.session_state["user"]["id"]):
 
 render_dashboard_hero(st.session_state["user"]["username"])
 render_todays_snapshot(_dash_lat, _dash_lon, _dash_tz, _dash_city)
+
+st.markdown(f'<div class="kcard"><h4>\U0001f31f Nakshatra Live Clock</h4>', unsafe_allow_html=True)
+render_nakshatra_live_clock(_dash_lat, _dash_lon, _dash_tz)
+st.markdown("</div>", unsafe_allow_html=True)
 
 
 if PAYMENT_TEST_MODE:
