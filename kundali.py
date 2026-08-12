@@ -4519,20 +4519,27 @@ if is_premium(user_id):
                  f'({form["city"][0]})</p>', unsafe_allow_html=True)
     t_header = "<tr><th>Graha</th><th>Degree</th><th>Zodiac Sign</th><th>Nakṣatra</th></tr>"
     t_rows = []
+    _jd_now_transit = transit_chart["jd"]
     for b in core_transit_bodies:
         if b["key"] == "As":
             continue
         retro = " ℞" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
+        color = PLANET_TRANSIT_COLORS.get(b["key"], C["ivory"])
+        entry_jd, exit_jd = compute_nakshatra_transit_window(b["key"], _jd_now_transit, b["nakIdx"])
+        entry_str = jd_to_local_date_str(entry_jd, tz) if entry_jd else "\u2014"
+        exit_str = jd_to_local_date_str(exit_jd, tz) if exit_jd else "\u2014"
         t_rows.append(
-            f'<tr><td class="body-key">{b["key"]}</td>'
+            f'<tr style="background:{color}22;">'
+            f'<td class="body-key" style="color:{color};">{b["key"]}</td>'
             f'<td>{fmt_deg(b["inSign"])}{retro}</td>'
             f'<td>{SIGNS[b["sign"]]}</td>'
-            f'<td>{NAKSHATRAS[b["nakIdx"]]}</td></tr>'
+            f'<td>{NAKSHATRAS[b["nakIdx"]]} <span class="kmuted" style="font-size:12px;">'
+            f'({entry_str} \u2013 {exit_str})</span></td></tr>'
         )
     st.markdown(
         f'<table class="gtable">{t_header}{"".join(t_rows)}</table>'
         f'<p class="kmuted" style="font-size:12px;margin-top:8px;">'
-        "℞ = retrograde.</p>",
+        "℞ = retrograde. Dates in brackets are when the graha entered its current nakṣatra and when it will next leave it.</p>",
         unsafe_allow_html=True,
     )
 
