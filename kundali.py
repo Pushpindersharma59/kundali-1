@@ -182,6 +182,74 @@ def ayanamsa(jd: float) -> float:
     return AYAN_J2000 + ((jd - 2451545.0) / 365.25) * 0.013972
 
 
+_PLANET_NAME_MAP = {"Ma": "Mars", "Me": "Mercury", "Jp": "Jupiter", "Ve": "Venus", "Sa": "Saturn"}
+
+
+def graha_sidereal_lon_at_jd(key: str, jd: float) -> float:
+    """A single graha's sidereal longitude at a given Julian Day — mirrors
+    compute_chart's exact per-key ayanamsa convention (Su/Mo/Ra/Ke use the
+    date-varying ayanamsa(jd); the 5 classical planets use the fixed
+    AYAN_J2000, matching how compute_chart already computes them, so this
+    stays consistent with everything else the app displays)."""
+    if key == "Su":
+        return norm360(sun_longitude(jd) - ayanamsa(jd))
+    if key == "Mo":
+        return norm360(moon_longitude(jd) - ayanamsa(jd))
+    if key == "Ra":
+        return norm360(mean_node(jd) - ayanamsa(jd))
+    if key == "Ke":
+        return norm360(mean_node(jd) - ayanamsa(jd) + 180)
+    return norm360(geo_longitude(_PLANET_NAME_MAP[key], jd) - AYAN_J2000)
+
+
+NAK_SPAN = 360.0 / 27.0
+# Coarse step size (days) and max search window (days) per graha, tuned to
+# each one's typical speed through the zodiac — the Moon crosses a nakshatra
+# in about a day, Saturn can take well over a year.
+_NAK_SEARCH_STEP = {"Su": 0.5, "Mo": 0.05, "Ma": 1.0, "Me": 1.0, "Jp": 3.0, "Ve": 1.0, "Sa": 5.0, "Ra": 5.0, "Ke": 5.0}
+_NAK_SEARCH_MAX_DAYS = {"Su": 25, "Mo": 3, "Ma": 400, "Me": 130, "Jp": 900, "Ve": 130, "Sa": 900, "Ra": 900, "Ke": 900}
+
+
+def find_nakshatra_transition_jd(key: str, jd0: float, current_idx: int, search_forward: bool):
+    """Steps through time from jd0 (forward or backward) until this graha's
+    nakshatra index differs from current_idx, then bisects to pin down the
+    transition moment precisely. Returns a Julian Day, or None if nothing
+    was found within the search window (shouldn't normally happen given the
+    per-graha window sizes above)."""
+    step = _NAK_SEARCH_STEP[key] * (1 if search_forward else -1)
+    n_steps = int(_NAK_SEARCH_MAX_DAYS[key] / _NAK_SEARCH_STEP[key])
+    jd_same = jd0
+    for i in range(1, n_steps + 1):
+        jd_probe = jd0 + step * i
+        idx_probe = int(graha_sidereal_lon_at_jd(key, jd_probe) // NAK_SPAN) % 27
+        if idx_probe != current_idx:
+            lo, hi = (jd_same, jd_probe) if search_forward else (jd_probe, jd_same)
+            for _ in range(40):
+                mid = (lo + hi) / 2
+                mid_idx = int(graha_sidereal_lon_at_jd(key, mid) // NAK_SPAN) % 27
+                if mid_idx == current_idx:
+                    lo = mid
+                else:
+                    hi = mid
+            return hi if search_forward else lo
+        jd_same = jd_probe
+    return None
+
+
+def compute_nakshatra_transit_window(key: str, jd_now: float, nak_idx: int):
+    """Returns (entry_jd_or_None, exit_jd_or_None) — when this graha entered
+    its current nakshatra and when it will next leave it."""
+    entry_jd = find_nakshatra_transition_jd(key, jd_now, nak_idx, search_forward=False)
+    exit_jd = find_nakshatra_transition_jd(key, jd_now, nak_idx, search_forward=True)
+    return entry_jd, exit_jd
+
+
+def jd_to_local_date_str(jd: float, tz: float) -> str:
+    """Julian Day (UT) -> a 'DD Mon YYYY' string in the given UTC offset."""
+    local_dt = datetime(2000, 1, 1) + timedelta(days=(jd - julian_day(2000, 1, 1, 0.0))) + timedelta(hours=tz)
+    return local_dt.strftime("%d %b %Y")
+
+
 def ascendant(jd: float, lat_deg: float, lon_deg: float) -> float:
     T = (jd - 2451545.0) / 36525
     gmst = norm360(280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * T * T)
@@ -989,7 +1057,7 @@ PLANET_TRANSIT_COLORS = {
     "Ma": "#E74C3C",  # red
     "Me": "#2ECC71",  # green
     "Jp": "#F1C40F",  # yellow
-    "Ve": "#C2185B",  # dark pink
+    "Ve": "#F1948A",  # light red
     "Sa": "#8B5E3C",  # brown
     "Ra": "#8E44AD",  # purple
     "Ke": "#8E44AD",  # purple (paired with Rahu — not individually specified)
@@ -4470,19 +4538,37 @@ if is_premium(user_id):
 
     st.markdown(f'<p style="color:{C["gold"]};font-weight:700;margin-top:18px;">Transit Insights</p>', unsafe_allow_html=True)
     _conjunctions = compute_transit_conjunctions(core_transit_bodies)
+    _jd_now = transit_chart["jd"]
+    _insight_cards = []
     for b in core_transit_bodies:
         if b["key"] == "As":
             continue
         retro = " ℞" if (b["retro"] and b["key"] not in ("Ra", "Ke")) else ""
-        with st.expander(
+        color = PLANET_TRANSIT_COLORS.get(b["key"], C["gold"])
+        entry_jd, exit_jd = compute_nakshatra_transit_window(b["key"], _jd_now, b["nakIdx"])
+        entry_str = jd_to_local_date_str(entry_jd, tz) if entry_jd else "before this window"
+        exit_str = jd_to_local_date_str(exit_jd, tz) if exit_jd else "beyond this window"
+        insight_text = build_transit_insight(b, _conjunctions.get(b["key"], []))
+        _insight_cards.append(
+            f'<details style="background:{C["panel"]}; '
+            f'border:1px solid {C["line"]}; border-left:5px solid {color}; border-radius:10px; '
+            f'margin-bottom:10px; padding:12px 16px;">'
+            f'<summary style="cursor:pointer; font-weight:700; color:{color}; font-size:15px;">'
             f'{b["key"]} — {BODY_FULLNAME_ASCII.get(b["key"], b["key"])} in {SIGNS[b["sign"]]}{retro} '
-            f'({NAKSHATRAS[b["nakIdx"]]})'
-        ):
-            st.markdown(build_transit_insight(b, _conjunctions.get(b["key"], [])))
+            f'({NAKSHATRAS[b["nakIdx"]]})</summary>'
+            f'<div style="margin-top:10px;">'
+            f'<p style="font-size:14px;">{insight_text}</p>'
+            f'<p style="font-size:13px;background:{C["panelSoft"]};border-radius:6px;padding:8px 12px;margin-top:8px;">'
+            f'<b>In {NAKSHATRAS[b["nakIdx"]]} from</b> {entry_str} <b>to</b> {exit_str}'
+            f'{" (still transiting)" if not exit_jd else ""}</p>'
+            f'</div></details>'
+        )
+    st.markdown("".join(_insight_cards), unsafe_allow_html=True)
     st.caption(
         "⚠️ General, educational context about the current sky — not a personalised prediction. "
         "A full transit reading also weighs your natal chart (which houses these transits activate "
-        "for you specifically), classical aspects (drishti) between planets, and more."
+        "for you specifically), classical aspects (drishti) between planets, and more. Entry/exit "
+        "dates are computed directly from this app's ephemeris, in the birth location's local time."
     )
 
     st.markdown("</div>", unsafe_allow_html=True)
