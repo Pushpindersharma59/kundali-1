@@ -4460,7 +4460,7 @@ if is_premium(st.session_state["user"]["id"]):
         }}
         </style>
         <div class="section-nav">
-            <a href="#section-transit">🔄 Current Transit</a>
+            <a href="#section-transit">🔄 Nakshatra Live &amp; Current Transits</a>
             <a href="#section-remedies">📿 Day-wise Remedies</a>
             <a href="#section-navtara">🌙 Navtara Chakra</a>
             <a href="#section-muhurta">🕉️ Panchang &amp; Muhurta</a>
@@ -4473,10 +4473,6 @@ if is_premium(st.session_state["user"]["id"]):
 
 render_dashboard_hero(st.session_state["user"]["username"])
 render_todays_snapshot(_dash_lat, _dash_lon, _dash_tz, _dash_city)
-
-st.markdown(f'<div class="kcard"><h4>\U0001f31f Nakshatra Live Clock</h4>', unsafe_allow_html=True)
-render_nakshatra_live_clock(_dash_lat, _dash_lon, _dash_tz)
-st.markdown("</div>", unsafe_allow_html=True)
 
 
 if PAYMENT_TEST_MODE:
@@ -4815,7 +4811,10 @@ if is_premium(user_id):
         )
 
     st.markdown('<div id="section-transit"></div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="kcard" style="border-top:3px solid {C["gold"]};"><h4 style="margin-bottom:14px;">🔄 Current Transit</h4>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kcard" style="border-top:3px solid {C["gold"]};"><h4 style="margin-bottom:14px;">🔄 Nakshatra Live &amp; Current Transits</h4>', unsafe_allow_html=True)
+    st.markdown('<p style="color:{0};font-weight:700;margin-bottom:6px;">🌟 Nakshatra Live</p>'.format(C["gold"]), unsafe_allow_html=True)
+    render_nakshatra_live_clock(lat, lon, tz)
+    st.markdown(f'<p style="color:{C["gold"]};font-weight:700;margin-top:20px;margin-bottom:6px;">🔄 Current Transits</p>', unsafe_allow_html=True)
     st.markdown(f'<p class="kmuted" style="margin-bottom:10px;">As of {transit_label} '
                  f'({form["city"][0]})</p>', unsafe_allow_html=True)
     t_header = "<tr><th>Graha</th><th>Degree</th><th>Zodiac Sign</th><th>Nakṣatra</th></tr>"
