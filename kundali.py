@@ -1308,6 +1308,7 @@ def init_db():
             username_lower TEXT UNIQUE NOT NULL,
             email TEXT,
             email_lower TEXT,
+            phone TEXT,
             pw_hash TEXT NOT NULL,
             pw_salt TEXT NOT NULL,
             created_at REAL NOT NULL
@@ -1367,6 +1368,23 @@ def init_db():
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users(email_lower) "
         "WHERE email_lower IS NOT NULL AND email_lower != ''"
+    )
+
+    if "phone" not in existing_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN phone TEXT")
+    phone_dupes = conn.execute("""
+        SELECT phone FROM users WHERE phone IS NOT NULL AND phone != ''
+        GROUP BY phone HAVING COUNT(*) > 1
+    """).fetchall()
+    for row in phone_dupes:
+        ids = [r["id"] for r in conn.execute(
+            "SELECT id FROM users WHERE phone=? ORDER BY id", (row["phone"],)
+        ).fetchall()]
+        for extra_id in ids[1:]:
+            conn.execute("UPDATE users SET phone=NULL WHERE id=?", (extra_id,))
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone) "
+        "WHERE phone IS NOT NULL AND phone != ''"
     )
 
     # ---- Migration: add is_premium if this DB predates the premium feature.
@@ -1452,6 +1470,7 @@ def check_password(password: str, salt_hex: str, stored_hash: str) -> bool:
 
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+PHONE_RE = re.compile(r"^\+?[0-9]{7,15}$")
 
 
 def username_taken(username: str) -> bool:
@@ -1472,23 +1491,34 @@ def email_taken(email: str) -> bool:
     return row is not None
 
 
-def create_user(username: str, password: str, email: str = ""):
-    """Returns (ok, message). Email is optional but, if given, must be unique."""
+def phone_taken(phone: str) -> bool:
+    conn = get_conn()
+    row = conn.execute("SELECT 1 FROM users WHERE phone=?", (phone,)).fetchone()
+    conn.close()
+    return row is not None
+
+
+def create_user(username: str, password: str, email: str = "", phone: str = ""):
+    """Returns (ok, message). Email and phone are both optional but, if
+    given, must be validly formatted and unique."""
     conn = get_conn()
     pw_hash, pw_salt = hash_password(password)
     email_clean = email.strip() or None
     email_lower = email_clean.lower() if email_clean else None
+    phone_clean = phone.strip() or None
     try:
         conn.execute(
-            "INSERT INTO users (username, username_lower, email, email_lower, pw_hash, pw_salt, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (username, username.lower(), email_clean, email_lower, pw_hash, pw_salt, time.time()),
+            "INSERT INTO users (username, username_lower, email, email_lower, phone, pw_hash, pw_salt, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (username, username.lower(), email_clean, email_lower, phone_clean, pw_hash, pw_salt, time.time()),
         )
         conn.commit()
         return True, ""
     except sqlite3.IntegrityError:
         if email_lower and email_taken(email):
             return False, "That email is already registered — try logging in instead."
+        if phone_clean and phone_taken(phone_clean):
+            return False, "That phone number is already registered — try logging in instead."
         return False, "That username is already taken — pick another one."
     finally:
         conn.close()
@@ -2098,6 +2128,8 @@ def render_auth_screen():
 
         with tab_signup:
             su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
+            su_email = st.text_input("Email (optional)", key="su_email", placeholder="you@example.com")
+            su_phone = st.text_input("Phone number (optional)", key="su_phone", placeholder="+91 98765 43210")
             su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
             su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
             su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
@@ -2107,6 +2139,18 @@ def render_auth_screen():
                     errors.append("Username must be 3-20 characters: letters, numbers, underscore only.")
                 elif username_taken(su_username):
                     errors.append("That username is already taken — pick another one.")
+                su_email_clean = (su_email or "").strip()
+                if su_email_clean:
+                    if not EMAIL_RE.match(su_email_clean):
+                        errors.append("Enter a valid email address, or leave it blank.")
+                    elif email_taken(su_email_clean):
+                        errors.append("That email is already registered — try logging in instead.")
+                su_phone_clean = re.sub(r"[\s\-()]", "", (su_phone or "").strip())
+                if su_phone_clean:
+                    if not PHONE_RE.match(su_phone_clean):
+                        errors.append("Enter a valid phone number (7-15 digits, optional + prefix), or leave it blank.")
+                    elif phone_taken(su_phone_clean):
+                        errors.append("That phone number is already registered — try logging in instead.")
                 if len(su_pw or "") < 8:
                     errors.append("Password must be at least 8 characters.")
                 if su_pw != su_pw2:
@@ -2117,7 +2161,7 @@ def render_auth_screen():
                     for e in errors:
                         st.error(e)
                 else:
-                    ok, msg = create_user(su_username.strip(), su_pw)
+                    ok, msg = create_user(su_username.strip(), su_pw, su_email_clean, su_phone_clean)
                     if not ok:
                         st.error(msg)
                     else:
