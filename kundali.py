@@ -3831,10 +3831,12 @@ def compute_planetary_strength_today(lat: float, lon: float, tz: float) -> dict:
     return scores
 
 
-def build_strength_radar_svg(scores: dict, size: int = 220) -> str:
-    """A simple SVG radar/spider chart for the 7-graha strength scores."""
+def build_strength_radar_svg(scores: dict, size: int = 260) -> str:
+    """A simple SVG radar/spider chart for the 7-graha strength scores, with
+    each point's percentage labelled just outside the shape and the planet
+    name pushed further out still, so the two never overlap."""
     cx = cy = size / 2
-    r_max = size * 0.36
+    r_max = size * 0.32
     n = len(STRENGTH_GRAHAS)
     parts = [f'<svg viewBox="0 0 {size} {size}" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto;">']
 
@@ -3849,16 +3851,22 @@ def build_strength_radar_svg(scores: dict, size: int = 220) -> str:
     for i in range(n):
         x, y = pt(r_max, i)
         parts.append(f'<line x1="{cx}" y1="{cy}" x2="{x:.1f}" y2="{y:.1f}" stroke="{C["line"]}" stroke-width="1"/>')
-        lx, ly = pt(r_max + 16, i)
+        lx, ly = pt(r_max + 30, i)
         parts.append(f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="middle" dominant-baseline="middle" '
-                      f'font-size="11" fill="{C["muted"]}" font-family="Georgia, serif">{STRENGTH_GRAHAS[i]}</text>')
+                      f'font-size="12" font-weight="700" fill="{C["muted"]}" '
+                      f'font-family="Georgia, serif">{STRENGTH_GRAHAS[i]}</text>')
 
-    data_pts = [pt(r_max * (scores[STRENGTH_GRAHAS[i]] / 100), i) for i in range(n)]
+    data_radii = [r_max * (scores[STRENGTH_GRAHAS[i]] / 100) for i in range(n)]
+    data_pts = [pt(data_radii[i], i) for i in range(n)]
     data_str = " ".join(f"{x:.1f},{y:.1f}" for x, y in data_pts)
     parts.append(f'<polygon points="{data_str}" fill="{C["gold"]}" fill-opacity="0.28" '
                  f'stroke="{C["gold"]}" stroke-width="2"/>')
-    for x, y in data_pts:
-        parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="{C["gold"]}"/>')
+    for i, (x, y) in enumerate(data_pts):
+        parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.5" fill="{C["gold"]}"/>')
+        px, py = pt(data_radii[i] + 13, i)
+        parts.append(f'<text x="{px:.1f}" y="{py:.1f}" text-anchor="middle" dominant-baseline="middle" '
+                      f'font-size="9.5" font-weight="700" fill="{C["sindoor"]}" font-family="Georgia, serif">'
+                      f'{scores[STRENGTH_GRAHAS[i]]}%</text>')
 
     parts.append("</svg>")
     return "".join(parts)
@@ -3937,7 +3945,7 @@ def render_todays_snapshot(lat: float, lon: float, tz: float, city_name: str):
             unsafe_allow_html=True,
         )
     with sc4:
-        radar_svg = build_strength_radar_svg(strength_scores, 190)
+        radar_svg = build_strength_radar_svg(strength_scores, 240)
         st.markdown(
             f'<div class="kcard" style="min-height:190px;text-align:center;">'
             f'<h4 style="font-size:14px;">Planetary Strength</h4>{radar_svg}</div>',
@@ -4067,9 +4075,6 @@ if _dash_profile and _dash_profile.get("lat") is not None:
 else:
     _dash_lat, _dash_lon, _dash_tz, _dash_city = 30.21, 74.95, 5.5, "Bathinda"
 
-render_dashboard_hero(st.session_state["user"]["username"])
-render_todays_snapshot(_dash_lat, _dash_lon, _dash_tz, _dash_city)
-
 if is_premium(st.session_state["user"]["id"]):
     st.markdown(
         f"""
@@ -4100,6 +4105,10 @@ if is_premium(st.session_state["user"]["id"]):
         """,
         unsafe_allow_html=True,
     )
+
+render_dashboard_hero(st.session_state["user"]["username"])
+render_todays_snapshot(_dash_lat, _dash_lon, _dash_tz, _dash_city)
+
 
 if PAYMENT_TEST_MODE:
     st.markdown(
