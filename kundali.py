@@ -1011,27 +1011,40 @@ def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int, show_nakshatra:
     # stays compact and visually separated from its neighbours, rather than
     # spreading into the next house's triangular space.
     LAYOUT_TIERS = [
-        (2, 1, 14, 10, 24 if show_nakshatra else 14, 0),
-        (3, 1, 12.5, 9, 20 if show_nakshatra else 13, 0),
-        (4, 2, 10.5, 7.5, 18 if show_nakshatra else 11.5, 52),
-        (6, 2, 9, 6.5, 15.5 if show_nakshatra else 10, 46),
-        (9, 3, 7.5, 6, 13.5 if show_nakshatra else 9, 38),
-        (99, 3, 6.5, 5.5, 12 if show_nakshatra else 8, 34),
+        (2, 1, 15.5, 11, 25 if show_nakshatra else 15, 0),
+        (3, 1, 14, 10, 21 if show_nakshatra else 14, 0),
+        (4, 2, 12, 8.5, 19 if show_nakshatra else 12.5, 56),
+        (6, 2, 10.5, 7.5, 16.5 if show_nakshatra else 11, 50),
+        (9, 3, 9, 7, 14.5 if show_nakshatra else 9.5, 42),
+        (99, 3, 8, 6, 13 if show_nakshatra else 8.5, 38),
     ]
 
-    for h, (cx, cy) in enumerate(HOUSE_CENTERS):
+    chart_center = (200, 200)
+    for h, (cx0, cy0) in enumerate(HOUSE_CENTERS):
         sign_num = ((asc_sign + h) % 12) + 1
         b, t = by_house[h]["b"], by_house[h]["t"]
         entries = [(x, "b") for x in b] + [(x, "t") for x in t]
         n = len(entries)
         if n == 0:
-            parts.append(f'<text x="{cx}" y="{cy - 8}" text-anchor="middle" font-size="10" '
+            parts.append(f'<text x="{cx0}" y="{cy0 - 8}" text-anchor="middle" font-size="10" '
                           f'fill="{C["muted"]}" font-family="monospace">{sign_num}</text>')
             continue
 
         cols, font_size, sub_size, row_h, col_w = next(
             (c, fs, ss, rh, cw) for max_n, c, fs, ss, rh, cw in LAYOUT_TIERS if n <= max_n
         )
+
+        # Push crowded houses outward from the chart's centre (away from
+        # whichever neighbour sits toward the middle), so two crowded houses
+        # near each other gain separation instead of their boxes touching.
+        if n >= 4:
+            dx, dy = cx0 - chart_center[0], cy0 - chart_center[1]
+            dist = math.hypot(dx, dy) or 1
+            push = min(6 + (n - 4) * 2, 22)
+            cx, cy = cx0 + (dx / dist) * push, cy0 + (dy / dist) * push
+        else:
+            cx, cy = cx0, cy0
+
         rows = math.ceil(n / cols)
         total_h = rows * row_h
         total_w = cols * col_w if cols > 1 else font_size * 3.4
