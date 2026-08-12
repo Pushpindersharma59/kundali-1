@@ -1006,15 +1006,17 @@ def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int, show_nakshatra:
         f'stroke-width="1" opacity="0.85" />',
     ]
 
-    # (max_n, columns, font_size, sub_size, row_height, col_width) — chosen so
+    # (max_n, columns, font_size, sub_size, row_height, col_width) — tuned so
     # even a heavily-crowded house (birth + transit grahas sharing one sign)
-    # stays within the diamond's available space.
+    # stays compact and visually separated from its neighbours, rather than
+    # spreading into the next house's triangular space.
     LAYOUT_TIERS = [
         (2, 1, 14, 10, 24 if show_nakshatra else 14, 0),
-        (3, 1, 12.5, 9, 21 if show_nakshatra else 13, 0),
-        (6, 2, 10.5, 7.5, 19 if show_nakshatra else 12, 54),
-        (9, 2, 9, 6.5, 16 if show_nakshatra else 10.5, 50),
-        (99, 3, 7.5, 6, 14 if show_nakshatra else 9.5, 40),
+        (3, 1, 12.5, 9, 20 if show_nakshatra else 13, 0),
+        (4, 2, 10.5, 7.5, 18 if show_nakshatra else 11.5, 52),
+        (6, 2, 9, 6.5, 15.5 if show_nakshatra else 10, 46),
+        (9, 3, 7.5, 6, 13.5 if show_nakshatra else 9, 38),
+        (99, 3, 6.5, 5.5, 12 if show_nakshatra else 8, 34),
     ]
 
     for h, (cx, cy) in enumerate(HOUSE_CENTERS):
@@ -1032,7 +1034,19 @@ def build_svg_chart(birth_bodies, transit_bodies, asc_sign: int, show_nakshatra:
         )
         rows = math.ceil(n / cols)
         total_h = rows * row_h
+        total_w = cols * col_w if cols > 1 else font_size * 3.4
         start_y = cy - total_h / 2 + row_h * 0.7
+
+        # Subtle background box behind this house's whole cluster — makes it
+        # visually unambiguous which entries belong together even when two
+        # crowded houses sit close to each other near the diamond's center.
+        if n >= 4:
+            box_pad_x, box_pad_y = 6, 5
+            parts.append(
+                f'<rect x="{cx - total_w/2 - box_pad_x:.1f}" y="{start_y - row_h*0.75 - box_pad_y:.1f}" '
+                f'width="{total_w + box_pad_x*2:.1f}" height="{total_h + box_pad_y*2:.1f}" '
+                f'rx="6" fill="#FFFFFF" fill-opacity="0.55" stroke="{C["gold"]}" stroke-width="0.6" stroke-opacity="0.35"/>'
+            )
 
         parts.append(
             f'<text x="{cx}" y="{start_y - row_h - 2}" text-anchor="middle" font-size="10" '
