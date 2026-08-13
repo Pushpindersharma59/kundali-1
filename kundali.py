@@ -4803,12 +4803,12 @@ st.markdown(
     p, span, div, label {{ font-size: 17px; }}
     .stDataFrame, .stDataFrame * {{ font-size: 16px !important; }}
     h1 {{ font-size: 42px !important; }}
-    .gtable {{ width: 100%; border-collapse: collapse; font-size: 16px; }}
+    .gtable {{ width: 100%; border-collapse: collapse; font-size: 19px; }}
     .gtable th {{
         text-align: left; color: {C["gold"]}; font-weight: 700;
-        padding: 6px 10px; border-bottom: 2px solid {C["line"]}; white-space: nowrap;
+        padding: 10px 14px; border-bottom: 2px solid {C["line"]}; white-space: nowrap;
     }}
-    .gtable td {{ padding: 7px 10px; border-bottom: 1px solid {C["line"]}; white-space: nowrap; }}
+    .gtable td {{ padding: 11px 14px; border-bottom: 1px solid {C["line"]}; white-space: nowrap; }}
     .gtable tr:nth-child(even) {{ background: {C["panelSoft"]}; }}
     .gtable .lord {{ color: {C["sindoor"]}; font-weight: 600; }}
     .gtable .body-key {{ font-weight: 700; color: {C["sindoor"]}; }}
@@ -5153,7 +5153,7 @@ if is_premium(user_id):
             f'<td class="body-key" style="color:{color};">{b["key"]}</td>'
             f'<td>{fmt_deg(b["inSign"])}{retro}</td>'
             f'<td>{SIGNS[b["sign"]]}</td>'
-            f'<td>{NAKSHATRAS[b["nakIdx"]]} <span class="kmuted" style="font-size:12px;">'
+            f'<td>{NAKSHATRAS[b["nakIdx"]]} <span class="kmuted" style="font-size:15px;">'
             f'({entry_str} \u2013 {exit_str})</span></td></tr>'
         )
     st.markdown(
@@ -5179,13 +5179,13 @@ if is_premium(user_id):
         _insight_cards.append(
             f'<details style="background:{C["panel"]}; '
             f'border:1px solid {C["line"]}; border-left:5px solid {color}; border-radius:10px; '
-            f'margin-bottom:10px; padding:12px 16px;">'
-            f'<summary style="cursor:pointer; font-weight:700; color:{color}; font-size:15px;">'
+            f'margin-bottom:12px; padding:16px 20px;">'
+            f'<summary style="cursor:pointer; font-weight:700; color:{color}; font-size:18px;">'
             f'{b["key"]} — {BODY_FULLNAME_ASCII.get(b["key"], b["key"])} in {SIGNS[b["sign"]]}{retro} '
             f'({NAKSHATRAS[b["nakIdx"]]})</summary>'
-            f'<div style="margin-top:10px;">'
-            f'<p style="font-size:14px;">{insight_text}</p>'
-            f'<p style="font-size:13px;background:{C["panelSoft"]};border-radius:6px;padding:8px 12px;margin-top:8px;">'
+            f'<div style="margin-top:12px;">'
+            f'<p style="font-size:17px; line-height:1.55;">{insight_text}</p>'
+            f'<p style="font-size:16px;background:{C["panelSoft"]};border-radius:6px;padding:10px 14px;margin-top:10px;">'
             f'<b>In {NAKSHATRAS[b["nakIdx"]]} from</b> {entry_str} <b>to</b> {exit_str}'
             f'{" (still transiting)" if not exit_jd else ""}</p>'
             f'</div></details>'
