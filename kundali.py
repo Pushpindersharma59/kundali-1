@@ -4262,6 +4262,197 @@ def chaldean_name_number(name: str) -> dict:
     return {"compound": total, "reduced": reduce_number(total, preserve_master=False)}
 
 
+KARMIC_DEBT_NUMBERS = {13, 14, 16, 19}
+KARMIC_DEBT_MEANINGS = {
+    13: "Traditionally linked to past avoidance of hard work — the lesson is disciplined, "
+        "consistent effort rather than shortcuts.",
+    14: "Traditionally linked to past misuse of freedom — the lesson is balance and "
+        "moderation, especially around change and impulse.",
+    16: "Traditionally linked to past pride or ego — the lesson is humility, often arriving "
+        "through the unexpected collapse of something built on a shaky foundation.",
+    19: "Traditionally linked to past misuse of power — the lesson is learning to stand "
+        "independently while still cooperating with others.",
+}
+
+
+def _reduce_with_karmic_debt(n: int, preserve_master: bool = False):
+    """Same as reduce_number, but also reports whether 13, 14, 16, or 19
+    appeared as an intermediate sum along the way (a 'karmic debt' number,
+    in Pythagorean tradition — flagged here as an interpretive note, not
+    reduced away silently)."""
+    debt = None
+    while n > 9:
+        if n in KARMIC_DEBT_NUMBERS:
+            debt = n
+        if preserve_master and n in PYTHAGOREAN_MASTER_NUMBERS:
+            return n, debt
+        n = sum(int(d) for d in str(n))
+    return n, debt
+
+
+def pythagorean_attitude(dob: date) -> int:
+    """Birth month + birth day, reduced — the 'first reaction' number."""
+    m = reduce_number(dob.month, preserve_master=True)
+    d = reduce_number(dob.day, preserve_master=True)
+    return reduce_number(m + d, preserve_master=True)
+
+
+def pythagorean_balance(name: str) -> int:
+    """From the FIRST letter of each name part (initials) — how someone
+    tends to regain equilibrium under stress."""
+    parts = [p for p in name.split() if p]
+    total = sum(PYTHAGOREAN_LETTER_VALUES.get(p[0].upper(), 0) for p in parts if p[0].isalpha())
+    return reduce_number(total, preserve_master=True) if total else 0
+
+
+def pythagorean_hidden_passion(name: str) -> int:
+    """The number (1-9) that occurs most often among all letters in the
+    name — the standout natural talent that shows up repeatedly."""
+    counts = {}
+    for ch in _clean_name(name):
+        v = PYTHAGOREAN_LETTER_VALUES.get(ch)
+        if v:
+            counts[v] = counts.get(v, 0) + 1
+    if not counts:
+        return 0
+    return max(counts, key=lambda k: (counts[k], -k))
+
+
+def pythagorean_karmic_lessons(name: str) -> list:
+    """Numbers 1-9 that never appear at all among the name's letters —
+    traditionally read as areas life will keep presenting lessons in."""
+    present = {PYTHAGOREAN_LETTER_VALUES.get(ch) for ch in _clean_name(name)}
+    return [n for n in range(1, 10) if n not in present]
+
+
+def pythagorean_subconscious_self(name: str) -> int:
+    """9 minus the count of karmic lesson numbers — classically read as how
+    many of the 9 basic vibrations someone can instinctively draw on in a
+    crisis (higher = more resourceful under pressure, by this tradition)."""
+    return 9 - len(pythagorean_karmic_lessons(name))
+
+
+def pythagorean_personal_month(dob: date, year: int, month: int) -> int:
+    py = pythagorean_personal_year(dob, year)
+    return reduce_number(py + reduce_number(month, preserve_master=False), preserve_master=False)
+
+
+def pythagorean_personal_day(dob: date, year: int, month: int, day: int) -> int:
+    pm = pythagorean_personal_month(dob, year, month)
+    return reduce_number(pm + reduce_number(day, preserve_master=False), preserve_master=False)
+
+
+LO_SHU_POSITIONS = {4: (0, 0), 9: (0, 1), 2: (0, 2), 3: (1, 0), 5: (1, 1),
+                    7: (1, 2), 8: (2, 0), 1: (2, 1), 6: (2, 2)}
+LO_SHU_ARROWS = {
+    "Arrow of Determination": [4, 5, 6],
+    "Arrow of Spirituality": [2, 5, 8],
+    "Arrow of Intellect": [4, 9, 2],
+    "Arrow of Emotional Balance": [3, 5, 7],
+    "Arrow of Practicality": [8, 1, 6],
+}
+
+
+def compute_lo_shu_grid(dob: date) -> dict:
+    """Populates the traditional 3x3 Lo Shu grid from every digit in the
+    birth date, reports which cells are filled/missing/repeated, and checks
+    the five commonly-discussed 'arrows' (lines of three all present, or
+    all missing)."""
+    digits = [int(d) for d in f"{dob.day}{dob.month}{dob.year}" if d != "0"]
+    counts = {n: digits.count(n) for n in range(1, 10)}
+    present = [n for n in range(1, 10) if counts[n] > 0]
+    missing = [n for n in range(1, 10) if counts[n] == 0]
+    repeated = [n for n in range(1, 10) if counts[n] > 1]
+    arrows_present, arrows_missing = [], []
+    for arrow_name, cells in LO_SHU_ARROWS.items():
+        if all(counts[c] > 0 for c in cells):
+            arrows_present.append(arrow_name)
+        elif all(counts[c] == 0 for c in cells):
+            arrows_missing.append(arrow_name)
+    return {
+        "counts": counts, "present": present, "missing": missing, "repeated": repeated,
+        "arrows_present": arrows_present, "arrows_missing": arrows_missing,
+    }
+
+
+NUMEROLOGY_COMPAT_GROUPS = {
+    1: {"harmonious": {1, 5, 7}, "friendly": {3, 9}, "challenging": {4, 8}},
+    2: {"harmonious": {2, 4, 8}, "friendly": {6, 9}, "challenging": {1, 5}},
+    3: {"harmonious": {3, 6, 9}, "friendly": {1, 5}, "challenging": {4, 7}},
+    4: {"harmonious": {2, 4, 8}, "friendly": {7}, "challenging": {3, 5, 9}},
+    5: {"harmonious": {1, 5, 7}, "friendly": {3}, "challenging": {2, 4}},
+    6: {"harmonious": {3, 6, 9}, "friendly": {2}, "challenging": {5, 7}},
+    7: {"harmonious": {1, 5, 7}, "friendly": {4}, "challenging": {3, 6, 8}},
+    8: {"harmonious": {2, 4, 8}, "friendly": {6}, "challenging": {1, 9}},
+    9: {"harmonious": {3, 6, 9}, "friendly": {1, 2}, "challenging": {4, 8}},
+    11: {"harmonious": {2, 11, 22}, "friendly": {6, 9}, "challenging": {1, 8}},
+    22: {"harmonious": {4, 11, 22}, "friendly": {2, 8}, "challenging": {5, 9}},
+    33: {"harmonious": {6, 11, 22, 33}, "friendly": {3, 9}, "challenging": {8}},
+}
+
+
+def _pair_score(a: int, b: int) -> int:
+    """0-100 interpretive closeness between two numerology numbers — this
+    scoring is an editorial construct of this application, not a
+    standardized numerological formula."""
+    a_r = a if a in NUMEROLOGY_COMPAT_GROUPS else reduce_number(a, preserve_master=True)
+    b_r = b if b in NUMEROLOGY_COMPAT_GROUPS else reduce_number(b, preserve_master=True)
+    if a_r == b_r:
+        return 90
+    groups_a = NUMEROLOGY_COMPAT_GROUPS.get(a_r, {"harmonious": set(), "friendly": set(), "challenging": set()})
+    if b_r in groups_a["harmonious"]:
+        return 82
+    if b_r in groups_a["friendly"]:
+        return 65
+    if b_r in groups_a["challenging"]:
+        return 35
+    return 55
+
+
+def compute_numerology_compatibility(name_a: str, dob_a: date, name_b: str, dob_b: date) -> dict:
+    """Compares two people across Life Path, Expression, Soul Urge,
+    Personality, and Birthday Number (Pythagorean throughout — this
+    comparison isn't run in Chaldean, to avoid mixing systems), producing an
+    overall interpretive score plus category breakdowns. This score is
+    generated by this application's own weighting, not a scientifically
+    validated measurement."""
+    a = {
+        "life_path": pythagorean_life_path(dob_a), "expression": pythagorean_expression(name_a),
+        "soul_urge": pythagorean_soul_urge(name_a), "personality": pythagorean_personality(name_a),
+        "birthday": pythagorean_birthday_number(dob_a),
+    }
+    b = {
+        "life_path": pythagorean_life_path(dob_b), "expression": pythagorean_expression(name_b),
+        "soul_urge": pythagorean_soul_urge(name_b), "personality": pythagorean_personality(name_b),
+        "birthday": pythagorean_birthday_number(dob_b),
+    }
+    scores = {k: _pair_score(a[k], b[k]) for k in a}
+    overall = round(
+        scores["life_path"] * 0.30 + scores["expression"] * 0.20 + scores["soul_urge"] * 0.25 +
+        scores["personality"] * 0.15 + scores["birthday"] * 0.10
+    )
+    if overall <= 30:
+        band = "Challenging"
+    elif overall <= 50:
+        band = "Moderate"
+    elif overall <= 70:
+        band = "Good"
+    elif overall <= 85:
+        band = "Strong"
+    else:
+        band = "Highly compatible"
+    categories = {
+        "❤️ Love Compatibility": round(scores["soul_urge"] * 0.6 + scores["life_path"] * 0.4),
+        "💬 Communication": round(scores["expression"] * 0.6 + scores["personality"] * 0.4),
+        "💰 Financial Compatibility": round(scores["life_path"] * 0.5 + scores["expression"] * 0.5),
+        "🤝 Friendship": round(scores["personality"] * 0.5 + scores["soul_urge"] * 0.5),
+        "💍 Long-Term Potential": round(scores["life_path"] * 0.5 + scores["birthday"] * 0.5),
+        "🔥 Attraction": round(scores["soul_urge"] * 0.7 + scores["personality"] * 0.3),
+        "🧠 Mental Compatibility": round(scores["expression"] * 0.5 + scores["life_path"] * 0.5),
+    }
+    return {"a": a, "b": b, "scores": scores, "overall": overall, "band": band, "categories": categories}
+
+
 def render_dashboard_hero(username: str, saved_profile):
     """Hero banner: a compact, top-to-bottom birth-details form on the left
     (Name, Date, Time, Place, Cast chart, Save chart) so entering details is
@@ -5381,6 +5572,15 @@ if is_premium(user_id):
         py_birthday = pythagorean_birthday_number(r_dob)
         py_maturity = pythagorean_maturity(py_life_path, py_expression)
         py_personal_year = pythagorean_personal_year(r_dob, date.today().year)
+        py_attitude = pythagorean_attitude(r_dob)
+        py_balance = pythagorean_balance(result["full_name"])
+        py_hidden_passion = pythagorean_hidden_passion(result["full_name"])
+        py_karmic_lessons = pythagorean_karmic_lessons(result["full_name"])
+        py_subconscious = pythagorean_subconscious_self(result["full_name"])
+        _, py_life_path_debt = _reduce_with_karmic_debt(
+            reduce_number(r_dob.month, True) + reduce_number(r_dob.day, True) + reduce_number(r_dob.year, True),
+            preserve_master=True,
+        )
 
         ch_life = chaldean_life_number(r_dob)
         ch_name = chaldean_name_number(name_for_expression)
@@ -5400,13 +5600,35 @@ if is_premium(user_id):
                 ("Birthday Number", py_birthday, "The day of the month you were born, reduced."),
                 ("Maturity Number", py_maturity, "Life Path + Expression — the theme of your later years."),
                 (f"Personal Year ({date.today().year})", py_personal_year, "The theme of your current calendar year."),
+                ("Attitude Number", py_attitude, "Birth month + birth day — your first reaction to situations."),
+                ("Balance Number", py_balance if py_balance else "—", "From the initials of each name part — how you regain composure under stress."),
+                ("Hidden Passion Number", py_hidden_passion if py_hidden_passion else "—", "The number appearing most often in your name — a standout natural talent."),
+                ("Subconscious Self Number", py_subconscious, "9 minus your karmic lessons — resourcefulness in a crisis, by this tradition."),
             ]
             for label, val, desc in py_rows:
+                meaning = NUMEROLOGY_MEANINGS_PYTHAGOREAN.get(val, "") if isinstance(val, int) else ""
                 st.markdown(
                     f'<div class="krow"><span class="kmuted">{label}</span>'
                     f'<span class="ksindoor" style="font-weight:700;font-size:18px;">{val}</span></div>'
-                    f'<p class="kmuted" style="font-size:12px;margin:-2px 0 8px;">{desc} '
-                    f'{NUMEROLOGY_MEANINGS_PYTHAGOREAN.get(val, "")}</p>',
+                    f'<p class="kmuted" style="font-size:12px;margin:-2px 0 8px;">{desc} {meaning}</p>',
+                    unsafe_allow_html=True,
+                )
+            karmic_text = (
+                ", ".join(str(n) for n in py_karmic_lessons) if py_karmic_lessons
+                else "none — every number 1-9 appears somewhere in your name"
+            )
+            st.markdown(
+                f'<div class="krow"><span class="kmuted">Karmic Lessons (missing numbers)</span>'
+                f'<span class="ksindoor" style="font-weight:700;font-size:16px;">{karmic_text}</span></div>'
+                f'<p class="kmuted" style="font-size:12px;margin:-2px 0 8px;">Numbers absent from your name\'s '
+                f'letters — traditionally read as themes life keeps presenting lessons in, not scientific fact.</p>',
+                unsafe_allow_html=True,
+            )
+            if py_life_path_debt:
+                st.markdown(
+                    f'<div style="background:{C["panelSoft"]};border-radius:8px;padding:8px 12px;margin-top:6px;">'
+                    f'<b>Karmic Debt {py_life_path_debt}/{py_life_path}</b> appeared while calculating your Life '
+                    f'Path. {KARMIC_DEBT_MEANINGS.get(py_life_path_debt, "")}</div>',
                     unsafe_allow_html=True,
                 )
             st.markdown("</div>", unsafe_allow_html=True)
@@ -5443,6 +5665,111 @@ if is_premium(user_id):
             "as a reflective tool rather than a factual claim about your personality or future. The two "
             "systems above are computed independently using their own letter tables and rules; a differing "
             "result between them doesn't mean either is 'wrong'."
+        )
+
+        st.markdown(f'<p style="font-family:Georgia,serif;font-size:18px;color:{C["ivory"]};margin-top:22px;">'
+                    f'🔲 Lo Shu Grid</p>', unsafe_allow_html=True)
+        loshu = compute_lo_shu_grid(r_dob)
+        grid_rows_html = []
+        for row in [[4, 9, 2], [3, 5, 7], [8, 1, 6]]:
+            cells = []
+            for n in row:
+                c = loshu["counts"][n]
+                shown = str(n) * c if c else ""
+                bg = C["panelSoft"] if c else "#fff"
+                cells.append(
+                    f'<td style="border:1px solid {C["line"]};width:70px;height:70px;text-align:center;'
+                    f'background:{bg};font-size:{18 if c<=2 else 14}px;font-weight:700;color:{C["ivory"] if c else C["muted"]};">'
+                    f'{shown if shown else "·"}</td>'
+                )
+            grid_rows_html.append("<tr>" + "".join(cells) + "</tr>")
+        lcol1, lcol2 = st.columns([1, 1.4])
+        with lcol1:
+            st.markdown(
+                f'<table style="border-collapse:collapse;margin:0 auto;">{"".join(grid_rows_html)}</table>',
+                unsafe_allow_html=True,
+            )
+        with lcol2:
+            st.markdown(
+                f'<p style="font-size:13px;"><b>Missing numbers:</b> {", ".join(map(str, loshu["missing"])) or "none"}</p>'
+                f'<p style="font-size:13px;"><b>Repeated numbers:</b> {", ".join(map(str, loshu["repeated"])) or "none"}</p>'
+                f'<p style="font-size:13px;"><b>Arrows present:</b> {", ".join(loshu["arrows_present"]) or "none"}</p>'
+                f'<p style="font-size:13px;"><b>Arrows missing:</b> {", ".join(loshu["arrows_missing"]) or "none"}</p>',
+                unsafe_allow_html=True,
+            )
+        st.caption(
+            "⚠️ The Lo Shu Grid is a Chinese numerological tradition — 'arrows' are lines of three cells "
+            "that are either all filled (a traditional strength) or all empty (a traditional growth area). "
+            "This is an interpretive framework, not a diagnostic tool."
+        )
+
+    st.markdown('<p style="font-family:Georgia,serif;font-size:18px;color:{0};margin-top:26px;">'
+                '✨ Master Numbers 11, 22, 33</p>'.format(C["ivory"]), unsafe_allow_html=True)
+    with st.expander("When are 11, 22, and 33 treated as Master Numbers?"):
+        st.markdown(
+            "In Pythagorean numerology, whenever a calculation's running total lands on **11, 22, or 33**, "
+            "it is traditionally left as-is rather than reduced further (so 11 is not treated as a 2, 22 is "
+            "not treated as a 4, and 33 is not treated as a 6) — this app follows that convention throughout "
+            "its Pythagorean calculations. Chaldean numerology, by contrast, does not use master numbers at "
+            "all; every Chaldean result above is fully reduced to a single digit.\n\n"
+            "- **11** — intuition and inspiration amplified; a heightened 2, often described as bringing "
+            "spiritual insight alongside emotional sensitivity that needs conscious grounding.\n"
+            "- **22** — the 'master builder'; a heightened 4, traditionally associated with turning big "
+            "visions into real, lasting structures.\n"
+            "- **33** — the 'master teacher'; a heightened 6, traditionally associated with large-scale, "
+            "selfless service and compassion.\n\n"
+            "Master numbers are traditionally described as carrying more intensity and higher potential, "
+            "but also more inner tension, than their reduced counterpart — this is a traditional "
+            "interpretation, not a measurable claim."
+        )
+
+    st.markdown('<p style="font-family:Georgia,serif;font-size:18px;color:{0};margin-top:22px;">'
+                '💞 Numerology Compatibility</p>'.format(C["ivory"]), unsafe_allow_html=True)
+    with st.form("numerology_compat_form"):
+        nca, ncb = st.columns(2)
+        with nca:
+            st.markdown("**Person A**")
+            compat_name_a = st.text_input("Full name", key="compat_num_name_a")
+            compat_dob_a = st.date_input("Date of birth", value=date(1995, 1, 1),
+                                          min_value=date(1900, 1, 1), max_value=date(2100, 12, 31), key="compat_num_dob_a")
+        with ncb:
+            st.markdown("**Person B**")
+            compat_name_b = st.text_input("Full name", key="compat_num_name_b")
+            compat_dob_b = st.date_input("Date of birth", value=date(1995, 1, 1),
+                                          min_value=date(1900, 1, 1), max_value=date(2100, 12, 31), key="compat_num_dob_b")
+        compat_submit = st.form_submit_button("Calculate Compatibility", use_container_width=True)
+
+    if compat_submit:
+        if not compat_name_a.strip() or not compat_name_b.strip():
+            st.error("Enter both names to calculate compatibility.")
+        elif not _clean_name(compat_name_a) or not _clean_name(compat_name_b):
+            st.error("Both names need to be entered using Latin letters (A-Z) for this calculation.")
+        else:
+            st.session_state["numerology_compat_result"] = compute_numerology_compatibility(
+                compat_name_a.strip(), compat_dob_a, compat_name_b.strip(), compat_dob_b
+            )
+
+    compat_result = st.session_state.get("numerology_compat_result")
+    if compat_result:
+        st.markdown(
+            f'<div class="kcard" style="text-align:center;border:2px solid {C["gold"]};">'
+            f'<p style="font-size:38px;font-weight:700;color:{C["gold"]};margin:6px 0;">'
+            f'{compat_result["overall"]}<span style="font-size:18px;color:{C["muted"]};">/100</span></p>'
+            f'<p style="font-size:16px;font-weight:700;color:{C["sindoor"]};margin:0;">{compat_result["band"]}</p>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        cat_html = "".join(
+            f'<div class="krow"><span class="kmuted">{cat}</span>'
+            f'<span style="font-weight:700;">{score}/100</span></div>'
+            for cat, score in compat_result["categories"].items()
+        )
+        st.markdown(f'<div class="kcard">{cat_html}</div>', unsafe_allow_html=True)
+        st.caption(
+            "⚠️ This compatibility score is an interpretive scoring system created by this application "
+            "(weighting Life Path, Expression, Soul Urge, Personality, and Birthday Number, all computed "
+            "in the Pythagorean system), not a scientifically validated measurement of relationship "
+            "outcomes."
         )
 
     st.markdown("</div>", unsafe_allow_html=True)
