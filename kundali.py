@@ -1440,10 +1440,16 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             name TEXT, dob TEXT, tob TEXT,
             city_name TEXT, city_region TEXT, lat REAL, lon REAL, tz REAL,
+            gender TEXT,
             updated_at REAL,
             FOREIGN KEY(user_id) REFERENCES users(id)
         )
     """)
+
+    # ---- Migration: add gender to profiles if this DB predates the field.
+    profile_cols = {row["name"] for row in conn.execute("PRAGMA table_info(profiles)").fetchall()}
+    if "gender" not in profile_cols:
+        conn.execute("ALTER TABLE profiles ADD COLUMN gender TEXT")
 
     # ---- Migration: bring an existing "users" table up to the current schema
     # (username_lower for case-insensitive login, email/email_lower for
@@ -1766,18 +1772,19 @@ def load_profile(user_id: int):
     return dict(row) if row else None
 
 
-def save_profile(user_id: int, name, dob_iso, tob_iso, city_name, city_region, lat, lon, tz):
+def save_profile(user_id: int, name, dob_iso, tob_iso, city_name, city_region, lat, lon, tz, gender=""):
     conn = get_conn()
     conn.execute(
         """
-        INSERT INTO profiles (user_id, name, dob, tob, city_name, city_region, lat, lon, tz, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO profiles (user_id, name, dob, tob, city_name, city_region, lat, lon, tz, gender, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET
             name=excluded.name, dob=excluded.dob, tob=excluded.tob,
             city_name=excluded.city_name, city_region=excluded.city_region,
-            lat=excluded.lat, lon=excluded.lon, tz=excluded.tz, updated_at=excluded.updated_at
+            lat=excluded.lat, lon=excluded.lon, tz=excluded.tz, gender=excluded.gender,
+            updated_at=excluded.updated_at
         """,
-        (user_id, name, dob_iso, tob_iso, city_name, city_region, lat, lon, tz, time.time()),
+        (user_id, name, dob_iso, tob_iso, city_name, city_region, lat, lon, tz, gender, time.time()),
     )
     conn.commit()
     conn.close()
@@ -4479,6 +4486,11 @@ def render_dashboard_hero(username: str, saved_profile):
         st.markdown(f'<h4 style="margin-bottom:10px;">Birth Details</h4>', unsafe_allow_html=True)
         name = st.text_input("Name", value=(saved_profile["name"] if saved_profile else ""), placeholder="Name of chart")
 
+        gender_options = ["Male", "Female"]
+        default_gender = saved_profile.get("gender") if saved_profile else None
+        gender_index = gender_options.index(default_gender) if default_gender in gender_options else 0
+        gender = st.radio("Gender", gender_options, index=gender_index, horizontal=True, key="hero_gender")
+
         default_dob = date.fromisoformat(saved_profile["dob"]) if (saved_profile and saved_profile.get("dob")) else date(2026, 7, 16)
         dob = st.date_input(
             "Date of birth", value=default_dob,
@@ -4565,7 +4577,7 @@ def render_dashboard_hero(username: str, saved_profile):
         st.markdown(f'<div style="max-width:560px;margin:20px auto 0;">{solar_svg}</div>', unsafe_allow_html=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
-    return name, dob, tob, city, cast, save_clicked, save_label
+    return name, gender, dob, tob, city, cast, save_clicked, save_label
 
 
 def render_todays_snapshot(lat: float, lon: float, tz: float, city_name: str):
@@ -4895,7 +4907,7 @@ if is_premium(st.session_state["user"]["id"]):
     )
 
 saved_profile = load_profile(st.session_state["user"]["id"])
-name, dob, tob, city, cast, save_clicked, save_label = render_dashboard_hero(
+name, gender, dob, tob, city, cast, save_clicked, save_label = render_dashboard_hero(
     st.session_state["user"]["username"], saved_profile
 )
 if save_clicked:
@@ -4942,16 +4954,16 @@ if _want_new_chart and _limit_reached:
         # widget values so something renders, but WITHOUT counting it as a new
         # generation (no increment_usage call here, unlike the branch below).
         st.session_state["form"] = {
-            "name": name, "dob": dob, "tob": tob, "city": city,
+            "name": name, "gender": gender, "dob": dob, "tob": tob, "city": city,
         }
 elif _want_new_chart:
     st.session_state["form"] = {
-        "name": name, "dob": dob, "tob": tob, "city": city,
+        "name": name, "gender": gender, "dob": dob, "tob": tob, "city": city,
     }
     if cast:
         save_profile(
             st.session_state["user"]["id"], name, dob.isoformat(), tob.isoformat(),
-            city[0], city[1], city[2], city[3], city[4],
+            city[0], city[1], city[2], city[3], city[4], gender,
         )
     if not _premium_for_limit:
         increment_usage(_user_id_for_limit)
