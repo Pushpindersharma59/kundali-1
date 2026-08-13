@@ -4132,6 +4132,136 @@ def build_strength_radar_svg(scores: dict, size: int = 260) -> str:
     return "".join(parts)
 
 
+# ============================================================
+# NUMEROLOGY — Pythagorean and Chaldean systems, kept strictly separate.
+# ============================================================
+# The two systems use DIFFERENT letter-to-number tables and different
+# reduction conventions — this module never mixes a Pythagorean value into
+# a Chaldean calculation or vice versa. Each computation function is
+# explicitly named with its system so the caller can't accidentally cross
+# them.
+
+PYTHAGOREAN_LETTER_VALUES = {}
+for _i, _letters in enumerate(["AJS", "BKT", "CLU", "DMV", "ENW", "FOX", "GPY", "HQZ", "IR"], start=1):
+    for _ch in _letters:
+        PYTHAGOREAN_LETTER_VALUES[_ch] = _i
+
+# Chaldean deliberately has no letter mapped to 9 — in that tradition 9 is
+# considered sacred/complete and is reserved for the results of a
+# calculation, never assigned to a letter.
+CHALDEAN_LETTER_VALUES = {}
+for _i, _letters in enumerate(["AIJQY", "BKR", "CGLS", "DMT", "EHNX", "UVW", "OZ", "FP"], start=1):
+    for _ch in _letters:
+        CHALDEAN_LETTER_VALUES[_ch] = _i
+
+VOWELS = set("AEIOU")
+PYTHAGOREAN_MASTER_NUMBERS = {11, 22, 33}
+
+NUMEROLOGY_MEANINGS_PYTHAGOREAN = {
+    1: "Independence, leadership, initiative — the pioneer number.",
+    2: "Cooperation, diplomacy, sensitivity — the peacemaker number.",
+    3: "Creativity, self-expression, optimism — the communicator number.",
+    4: "Discipline, stability, hard work — the builder number.",
+    5: "Freedom, adaptability, change — the adventurer number.",
+    6: "Responsibility, nurturing, harmony — the caretaker number.",
+    7: "Introspection, analysis, spirituality — the seeker number.",
+    8: "Ambition, authority, material success — the achiever number.",
+    9: "Compassion, idealism, completion — the humanitarian number.",
+    11: "Master number — intuition, inspiration, spiritual insight (a heightened 2).",
+    22: "Master number — the 'master builder', large-scale practical vision (a heightened 4).",
+    33: "Master number — the 'master teacher', selfless compassion on a grand scale (a heightened 6).",
+}
+
+# Chaldean interpretations are traditionally framed a bit differently —
+# more fate/destiny-oriented, less about psychological traits — reflecting
+# the system's different origin. Kept as separate text so nothing bleeds
+# in from the Pythagorean meanings above.
+NUMEROLOGY_MEANINGS_CHALDEAN = {
+    1: "The Sun's number — authority, willpower, originality, a natural leader.",
+    2: "The Moon's number — sensitivity, partnership, imagination, but can bring emotional swings.",
+    3: "Jupiter's number — expansion, wisdom, good fortune, communication.",
+    4: "Rahu's number — sudden change, rebellion against convention, unconventional paths.",
+    5: "Mercury's number — versatility, quick thinking, business acumen, restlessness.",
+    6: "Venus's number — beauty, love, harmony, artistic and domestic affairs.",
+    7: "Ketu's number — introspection, mysticism, isolation, hidden depths.",
+    8: "Saturn's number — karma, discipline, delay followed by hard-won reward, tests of patience.",
+    9: "Mars's number — courage, energy, aggression, completion through struggle.",
+}
+
+
+def reduce_number(n: int, preserve_master: bool = False) -> int:
+    """Digit-sums n down to a single digit. If preserve_master is True
+    (Pythagorean convention), stops early at 11, 22, or 33. Chaldean
+    calculations should call this with preserve_master=False, since that
+    system doesn't treat those as special 'master' stopping points."""
+    while n > 9:
+        if preserve_master and n in PYTHAGOREAN_MASTER_NUMBERS:
+            return n
+        n = sum(int(d) for d in str(n))
+    return n
+
+
+def _clean_name(name: str) -> str:
+    return "".join(ch for ch in name.upper() if ch.isalpha())
+
+
+def pythagorean_life_path(dob: date) -> int:
+    """Standard Pythagorean method: reduce month, day, and year separately
+    (preserving master numbers at each step), then sum those three and
+    reduce again."""
+    m = reduce_number(dob.month, preserve_master=True)
+    d = reduce_number(dob.day, preserve_master=True)
+    y = reduce_number(dob.year, preserve_master=True)
+    return reduce_number(m + d + y, preserve_master=True)
+
+
+def pythagorean_expression(name: str) -> int:
+    total = sum(PYTHAGOREAN_LETTER_VALUES.get(ch, 0) for ch in _clean_name(name))
+    return reduce_number(total, preserve_master=True)
+
+
+def pythagorean_soul_urge(name: str) -> int:
+    total = sum(PYTHAGOREAN_LETTER_VALUES.get(ch, 0) for ch in _clean_name(name) if ch in VOWELS)
+    return reduce_number(total, preserve_master=True)
+
+
+def pythagorean_personality(name: str) -> int:
+    total = sum(PYTHAGOREAN_LETTER_VALUES.get(ch, 0) for ch in _clean_name(name) if ch not in VOWELS)
+    return reduce_number(total, preserve_master=True)
+
+
+def pythagorean_birthday_number(dob: date) -> int:
+    return reduce_number(dob.day, preserve_master=True)
+
+
+def pythagorean_maturity(life_path: int, expression: int) -> int:
+    return reduce_number(life_path + expression, preserve_master=True)
+
+
+def pythagorean_personal_year(dob: date, year: int) -> int:
+    m = reduce_number(dob.month, preserve_master=False)
+    d = reduce_number(dob.day, preserve_master=False)
+    y = reduce_number(year, preserve_master=False)
+    return reduce_number(m + d + y, preserve_master=False)
+
+
+def chaldean_life_number(dob: date) -> int:
+    """Chaldean birth/life number: sum every digit of the full date and
+    reduce fully to a single digit — this system doesn't preserve master
+    numbers the way Pythagorean does."""
+    digits = f"{dob.day}{dob.month}{dob.year}"
+    total = sum(int(d) for d in digits)
+    return reduce_number(total, preserve_master=False)
+
+
+def chaldean_name_number(name: str) -> dict:
+    """Chaldean tradition weighs both the unreduced 'compound number' (its
+    own separate meaning, roughly in the 1-52 range for a typical name) and
+    the final single-digit reduction — returns both."""
+    total = sum(CHALDEAN_LETTER_VALUES.get(ch, 0) for ch in _clean_name(name))
+    return {"compound": total, "reduced": reduce_number(total, preserve_master=False)}
+
+
 def render_dashboard_hero(username: str, saved_profile):
     """Hero banner: a compact, top-to-bottom birth-details form on the left
     (Name, Date, Time, Place, Cast chart, Save chart) so entering details is
@@ -4567,6 +4697,7 @@ if is_premium(st.session_state["user"]["id"]):
             <a href="#section-muhurta">🕉️ Panchang &amp; Muhurta</a>
             <a href="#section-compat">💞 Compatibility</a>
             <a href="#section-charts">📁 Charts</a>
+            <a href="#section-numerology">🔢 Numerology</a>
         </div>
         """,
         unsafe_allow_html=True,
@@ -5181,6 +5312,140 @@ if is_premium(user_id):
                     st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
+    st.markdown('<div id="section-numerology"></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="kcard" style="border-top:3px solid {C["gold"]};"><h4 style="margin-bottom:14px;">🔢 Numerology</h4>', unsafe_allow_html=True)
+
+    with st.expander("What's the difference between Pythagorean and Chaldean numerology?", expanded=False):
+        st.markdown(
+            "**Pythagorean** (the more common Western system) assigns letters to numbers 1–9 strictly "
+            "in alphabetical order (A=1, B=2, C=3 ... I=9, then repeating J=1, K=2...), works from your "
+            "**birth name** as legally recorded, and treats **11, 22, and 33** as special 'master numbers' "
+            "that are never reduced further.\n\n"
+            "**Chaldean** (the older system, with roots in ancient Babylon) assigns letters to numbers "
+            "based on **sound/vibration** rather than alphabetical order — notably, no letter is ever "
+            "assigned the number **9**, since it's considered sacred and reserved for outcomes, not inputs. "
+            "Chaldean traditionally favors the **name you currently go by** (not necessarily your birth "
+            "name), reduces every number fully to a single digit (no master numbers), and additionally "
+            "weighs the *unreduced* 'compound number' of a name for extra meaning.\n\n"
+            "Because the letter-value tables and reduction rules differ, **the two systems will usually "
+            "give different numbers for the same name** — this isn't an error, they're simply different "
+            "traditions. This page keeps every calculation strictly within its own system."
+        )
+
+    with st.form("numerology_form"):
+        nc1, nc2 = st.columns(2)
+        with nc1:
+            num_full_name = st.text_input("Full Name (as on birth record)", key="num_full_name")
+            num_dob = st.date_input("Date of Birth", value=date(1995, 1, 1), min_value=date(1900, 1, 1),
+                                     max_value=date(2100, 12, 31), key="num_dob")
+            num_preferred_name = st.text_input("Preferred / current name (optional)", key="num_preferred_name",
+                                                help="Chaldean numerology traditionally uses the name you currently go by.")
+        with nc2:
+            num_gender = st.selectbox("Gender (optional)", ["Prefer not to say", "Female", "Male", "Other"], key="num_gender")
+            num_birth_place = st.text_input("Birth location (optional)", key="num_birth_place")
+            num_email = st.text_input("Email (optional, for saving this report)", key="num_email")
+        num_submit = st.form_submit_button("Generate Numerology Profile", use_container_width=True)
+
+    if num_submit:
+        if not num_full_name.strip():
+            st.error("Enter your full name to generate a profile.")
+        elif not _clean_name(num_full_name):
+            st.error(
+                "Both Pythagorean and Chaldean numerology, as implemented here, are defined over the "
+                "Latin alphabet (A-Z) — enter your name using Latin letters (a romanized spelling works "
+                "fine) so the letter-to-number tables can be applied."
+            )
+        else:
+            st.session_state["numerology_result"] = {
+                "full_name": num_full_name.strip(),
+                "preferred_name": num_preferred_name.strip(),
+                "dob": num_dob.isoformat(),
+                "gender": num_gender,
+                "birth_place": num_birth_place.strip(),
+                "email": num_email.strip(),
+            }
+            if num_email.strip():
+                st.info("📧 Email capture noted — this app doesn't currently have email-sending "
+                        "infrastructure set up, so no report is actually emailed yet. Your results "
+                        "are shown below and can be saved to your Charts library instead.")
+
+    result = st.session_state.get("numerology_result")
+    if result:
+        r_dob = date.fromisoformat(result["dob"])
+        name_for_expression = result["preferred_name"] or result["full_name"]
+
+        py_life_path = pythagorean_life_path(r_dob)
+        py_expression = pythagorean_expression(result["full_name"])
+        py_soul_urge = pythagorean_soul_urge(result["full_name"])
+        py_personality = pythagorean_personality(result["full_name"])
+        py_birthday = pythagorean_birthday_number(r_dob)
+        py_maturity = pythagorean_maturity(py_life_path, py_expression)
+        py_personal_year = pythagorean_personal_year(r_dob, date.today().year)
+
+        ch_life = chaldean_life_number(r_dob)
+        ch_name = chaldean_name_number(name_for_expression)
+
+        st.markdown(f'<p style="font-family:Georgia,serif;font-size:20px;color:{C["ivory"]};margin-top:10px;">'
+                    f'Numerology Profile — {result["full_name"]}</p>', unsafe_allow_html=True)
+
+        pcol, ccol = st.columns(2)
+        with pcol:
+            st.markdown(f'<div class="kcard" style="border:2px solid {C["gold"]};">'
+                        f'<h4 style="font-size:15px;">Pythagorean System</h4>', unsafe_allow_html=True)
+            py_rows = [
+                ("Life Path Number", py_life_path, "From your date of birth — your core life theme."),
+                ("Expression (Destiny) Number", py_expression, "From all letters of your birth name — your natural talents."),
+                ("Soul Urge (Heart's Desire)", py_soul_urge, "From the vowels in your name — your inner motivation."),
+                ("Personality Number", py_personality, "From the consonants in your name — how others perceive you."),
+                ("Birthday Number", py_birthday, "The day of the month you were born, reduced."),
+                ("Maturity Number", py_maturity, "Life Path + Expression — the theme of your later years."),
+                (f"Personal Year ({date.today().year})", py_personal_year, "The theme of your current calendar year."),
+            ]
+            for label, val, desc in py_rows:
+                st.markdown(
+                    f'<div class="krow"><span class="kmuted">{label}</span>'
+                    f'<span class="ksindoor" style="font-weight:700;font-size:18px;">{val}</span></div>'
+                    f'<p class="kmuted" style="font-size:12px;margin:-2px 0 8px;">{desc} '
+                    f'{NUMEROLOGY_MEANINGS_PYTHAGOREAN.get(val, "")}</p>',
+                    unsafe_allow_html=True,
+                )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with ccol:
+            st.markdown(f'<div class="kcard" style="border:2px solid {C["sindoor"]};">'
+                        f'<h4 style="font-size:15px;">Chaldean System</h4>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="krow"><span class="kmuted">Life / Birth Number</span>'
+                f'<span class="ksindoor" style="font-weight:700;font-size:18px;">{ch_life}</span></div>'
+                f'<p class="kmuted" style="font-size:12px;margin:-2px 0 8px;">From every digit of your full '
+                f'date of birth, fully reduced. {NUMEROLOGY_MEANINGS_CHALDEAN.get(ch_life, "")}</p>',
+                unsafe_allow_html=True,
+            )
+            name_label = "Preferred name" if result["preferred_name"] else "Full name"
+            st.markdown(
+                f'<div class="krow"><span class="kmuted">Name Number ({name_label})</span>'
+                f'<span class="ksindoor" style="font-weight:700;font-size:18px;">{ch_name["reduced"]} '
+                f'<span class="kmuted" style="font-size:13px;">(compound {ch_name["compound"]})</span></span></div>'
+                f'<p class="kmuted" style="font-size:12px;margin:-2px 0 8px;">From {name_label.lower()}, using '
+                f'Chaldean sound-based letter values. {NUMEROLOGY_MEANINGS_CHALDEAN.get(ch_name["reduced"], "")}</p>',
+                unsafe_allow_html=True,
+            )
+            harmony = "harmonious" if ch_life == ch_name["reduced"] else "worth reflecting on together"
+            st.markdown(
+                f'<p style="font-size:13px;margin-top:10px;">Your Life Number ({ch_life}) and Name Number '
+                f'({ch_name["reduced"]}) are <b>{harmony}</b> in this reading.</p>',
+                unsafe_allow_html=True,
+            )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        st.caption(
+            "⚠️ Numerology is a symbolic/traditional system, not an empirically validated one — treat this "
+            "as a reflective tool rather than a factual claim about your personality or future. The two "
+            "systems above are computed independently using their own letter tables and rules; a differing "
+            "result between them doesn't mean either is 'wrong'."
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 else:
     st.markdown(
