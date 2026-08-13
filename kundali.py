@@ -2071,9 +2071,9 @@ def render_planetspath_solar_with_features():
     empty. No chevron arrows — these are informational, not links."""
     solar_svg = build_planetspath_solar_svg(620)
 
-    def _cell(icon, title, desc):
+    def _cell(icon, title, desc, valign="top"):
         return (
-            f'<td class="pp-grid-cell"><div class="pp-mini-feature">'
+            f'<td class="pp-grid-cell" style="vertical-align:{valign};"><div class="pp-mini-feature">'
             f'<div class="pp-mini-icon">{icon}</div>'
             f'<div><div class="pp-mini-title">{title.upper()}</div>'
             f'<div class="pp-mini-text">{desc}</div></div></div></td>'
@@ -2082,23 +2082,25 @@ def render_planetspath_solar_with_features():
     f = FEATURE_STRIP
     rows_html = (
         f'<tr>{_cell(*f[0])}{_cell(*f[1])}{_cell(*f[2])}</tr>'
-        f'<tr>{_cell(*f[3])}'
-        f'<td class="pp-grid-cell pp-center-cell" style="text-align:center;vertical-align:middle;">'
-        f'<div style="width:100%;margin:0 auto;">{solar_svg}</div></td>'
-        f'{_cell(*f[4])}</tr>'
+        f'<tr>{_cell(*f[3], valign="middle")}'
+        f'<td class="pp-grid-cell pp-center-cell" style="text-align:center;vertical-align:middle;padding:0;">'
+        f'<div class="pp-mini-solar">{solar_svg}</div></td>'
+        f'{_cell(*f[4], valign="middle")}</tr>'
         f'<tr>{_cell(*f[5])}{_cell(*f[6])}{_cell(*f[7])}</tr>'
     )
     st.markdown(
         f"""
         <style>
-        .pp-solar-table {{ width:100%; border-collapse:separate; border-spacing:18px; table-layout:fixed; margin-top:10px; }}
-        .pp-grid-cell {{ width:27%; vertical-align:top; }}
+        .pp-solar-table {{ width:100%; border-collapse:separate; border-spacing:12px 10px; table-layout:fixed; margin-top:6px; }}
+        .pp-grid-cell {{ width:27%; }}
         .pp-center-cell {{ width:46%; }}
         .pp-mini-feature {{
             background:rgba(255,255,255,.92); border:1px solid #eadfca; border-radius:16px;
-            padding:18px 20px; display:flex; align-items:center; gap:14px;
-            box-shadow:0 2px 8px rgba(104,82,40,.06); min-height:104px;
+            padding:16px 18px; display:flex; align-items:center; gap:14px;
+            box-shadow:0 2px 8px rgba(104,82,40,.06); min-height:96px;
         }}
+        .pp-mini-solar {{ width:300px; height:300px; margin:0 auto; }}
+        .pp-mini-solar svg {{ width:300px !important; height:300px !important; }}
         .pp-mini-icon {{
             width:50px; height:50px; border:1px solid #e8bd65; border-radius:50%;
             display:flex; align-items:center; justify-content:center; font-size:23px; color:#d28c16;
@@ -2112,7 +2114,7 @@ def render_planetspath_solar_with_features():
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<div class="pp-trust" style="margin-top:16px;">\u2699 Accurate Calculations <span>\u2022</span> '
+        '<div class="pp-trust" style="margin-top:10px;">\u2699 Accurate Calculations <span>\u2022</span> '
         '\u2726 Real Astronomy Data <span>\u2022</span> \u25c8 Trusted Insights</div>',
         unsafe_allow_html=True,
     )
