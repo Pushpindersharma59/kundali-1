@@ -4132,27 +4132,119 @@ def build_strength_radar_svg(scores: dict, size: int = 260) -> str:
     return "".join(parts)
 
 
-def render_dashboard_hero(username: str):
-    """Personalized welcome banner reusing the login page's solar-system
-    graphic, so the same visual identity carries through post-login."""
+def render_dashboard_hero(username: str, saved_profile):
+    """Hero banner: a compact, top-to-bottom birth-details form on the left
+    (Name, Date, Time, Place, Cast chart, Save chart) so entering details is
+    the very first thing on the page, with the solar-system graphic on the
+    right for the same visual identity as the login page. Returns the
+    collected form values (name, dob, tob, city, cast, save_clicked,
+    save_label) for the rest of the page to use — the actual chart results
+    render further down, so entering details here means scrolling down to
+    see them, same flow as before, just with the form moved to the top."""
     solar_svg = build_planetspath_solar_svg(480)
     st.markdown(
         f"""
-        <div style="position:relative; background:{C['panel']}; border:1px solid {C['line']};
-            border-radius:18px; padding:18px 24px; margin-bottom:16px; overflow:hidden;
-            display:flex; align-items:center; gap:14px;">
-            <div style="flex:0 0 30%; z-index:2;">
-                <p style="font-family:Georgia,serif; font-size:25px; color:{C['ivory']}; margin:0 0 6px;">
-                    Welcome back, {username}!</p>
-                <div style="width:60px;height:2px;background:{C['gold']};margin:8px 0 12px;"></div>
-                <p style="font-family:Georgia,serif; font-style:italic; color:{C['muted']}; font-size:14px; margin:0;">
-                    The planets move in their path,<br>and so does your destiny.</p>
-            </div>
-            <div style="flex:1 1 70%; max-width:560px; margin:0 auto;">{solar_svg}</div>
-        </div>
+        <style>
+        .hero-form-wrap {{ position:relative; background:{C['panel']}; border:1px solid {C['line']};
+            border-radius:18px; padding:20px 24px; margin-bottom:16px; overflow:hidden; }}
+        </style>
+        <div class="hero-form-wrap">
         """,
         unsafe_allow_html=True,
     )
+    hero_l, hero_r = st.columns([1, 1.1])
+
+    with hero_l:
+        st.markdown(f'<h4 style="margin-bottom:10px;">Birth Details</h4>', unsafe_allow_html=True)
+        name = st.text_input("Name", value=(saved_profile["name"] if saved_profile else ""), placeholder="Name of chart")
+
+        default_dob = date.fromisoformat(saved_profile["dob"]) if (saved_profile and saved_profile.get("dob")) else date(2026, 7, 16)
+        dob = st.date_input(
+            "Date of birth", value=default_dob,
+            min_value=date(1900, 1, 1), max_value=date(2100, 12, 31),
+        )
+
+        default_tob = dtime.fromisoformat(saved_profile["tob"]) if (saved_profile and saved_profile.get("tob")) else dtime(12, 16, 0)
+        st.markdown('<p style="margin-bottom:2px;">Time of birth (24h, local)</p>', unsafe_allow_html=True)
+        th_col, tm_col, ts_col = st.columns(3)
+        with th_col:
+            tob_hour = st.number_input("Hour", min_value=0, max_value=23, value=default_tob.hour, step=1, key="tob_hour")
+        with tm_col:
+            tob_minute = st.number_input("Minute", min_value=0, max_value=59, value=default_tob.minute, step=1, key="tob_minute")
+        with ts_col:
+            tob_second = st.number_input("Second", min_value=0, max_value=59, value=default_tob.second, step=1, key="tob_second")
+        tob = dtime(int(tob_hour), int(tob_minute), int(tob_second))
+
+        place_mode = st.radio(
+            "Birth place source",
+            ["Quick-pick from city list", "Search worldwide (any place)", "Enter coordinates manually"],
+            key="hero_place_mode",
+        )
+
+        if place_mode == "Enter coordinates manually":
+            default_place = saved_profile["city_name"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else ""
+            default_mlat = saved_profile["lat"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 30.21
+            default_mlon = saved_profile["lon"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 74.95
+            default_mtz = saved_profile["tz"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 5.5
+            place_name = st.text_input("Place name (for display only)", value=default_place, placeholder="e.g. Custom Town")
+            manual_lat = st.number_input("Latitude", min_value=-90.0, max_value=90.0, value=float(default_mlat), step=0.0001, format="%.4f")
+            manual_lon = st.number_input("Longitude", min_value=-180.0, max_value=180.0, value=float(default_mlon), step=0.0001, format="%.4f")
+            manual_tz = st.number_input("UTC offset (h)", min_value=-12.0, max_value=14.0, value=float(default_mtz), step=0.25, format="%.2f")
+            st.caption(
+                f"{abs(manual_lat):.4f}°{'N' if manual_lat >= 0 else 'S'}, "
+                f"{abs(manual_lon):.4f}°{'E' if manual_lon >= 0 else 'W'} · "
+                f"UTC{'+' if manual_tz >= 0 else ''}{manual_tz}"
+            )
+            city = (place_name if place_name else "Custom location", "Manual entry", manual_lat, manual_lon, manual_tz)
+
+        elif place_mode == "Search worldwide (any place)":
+            default_query = saved_profile["city_name"] if (saved_profile and saved_profile.get("city_region") == "Worldwide search") else ""
+            search_query = st.text_input(
+                "Birth place (any city, town, or village worldwide)",
+                value=default_query, placeholder="e.g. Hanumangarh, Rajasthan, India",
+            )
+            results = geocode_place(search_query) if search_query.strip() else []
+            if search_query.strip() and not results:
+                st.caption("No matches found — try a more specific query, or use Quick-pick / manual entry instead.")
+            if results:
+                result_labels = [r["display_name"] for r in results]
+                chosen_result_label = st.selectbox("Match", result_labels, label_visibility="collapsed")
+                chosen_result = results[result_labels.index(chosen_result_label)]
+                w_lat, w_lon = chosen_result["lat"], chosen_result["lon"]
+                w_tz = get_historical_utc_offset(w_lat, w_lon, dob.year, dob.month, dob.day, tob.hour, tob.minute, tob.second)
+                display_name = chosen_result["display_name"]
+                st.caption(
+                    f"{abs(w_lat):.4f}°{'N' if w_lat >= 0 else 'S'}, "
+                    f"{abs(w_lon):.4f}°{'E' if w_lon >= 0 else 'W'} · UTC{'+' if w_tz >= 0 else ''}{w_tz:.2f} on this date"
+                )
+                city = (display_name.split(",")[0].strip(), display_name, w_lat, w_lon, w_tz)
+            else:
+                city = ("Bathinda", "Punjab, India", 30.21, 74.95, 5.5)
+
+        else:
+            default_city_query = saved_profile["city_name"] if (saved_profile and saved_profile.get("city_region") not in ("Manual entry", "Worldwide search")) else "Bathinda"
+            city_query = st.text_input("Birth place (city)", value=default_city_query)
+            matches = [c for c in CITIES if city_query.lower() in (c[0] + " " + c[1]).lower()]
+            if not matches:
+                matches = CITIES[:8]
+            city_labels = [f"{c[0]} · {c[1]}" for c in matches[:8]]
+            chosen_label = st.selectbox("Match", city_labels, label_visibility="collapsed")
+            city = matches[city_labels.index(chosen_label)]
+            st.caption(
+                f"{abs(city[2]):.2f}°{'N' if city[2] >= 0 else 'S'}, "
+                f"{abs(city[3]):.2f}°{'E' if city[3] >= 0 else 'W'} · UTC{'+' if city[4] >= 0 else ''}{city[4]}"
+            )
+
+        cast = st.button("📊 Chart", use_container_width=True)
+
+        save_label = st.text_input("Label to save this chart as", value=(name or "Untitled chart"), key="hero_save_label")
+        save_clicked = st.button("💾 Save Chart", use_container_width=True)
+
+    with hero_r:
+        st.markdown(f'<div style="max-width:560px;margin:20px auto 0;">{solar_svg}</div>', unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+    return name, dob, tob, city, cast, save_clicked, save_label
 
 
 def render_todays_snapshot(lat: float, lon: float, tz: float, city_name: str):
@@ -4414,6 +4506,13 @@ handle_razorpay_return()
 if st.session_state.pop("just_upgraded", False):
     st.success("Payment verified — premium unlocked! 🎉")
 
+st.markdown(
+    f'<p style="font-family:Georgia,serif; font-style:italic; color:{C["muted"]}; '
+    f'font-size:14px; text-align:center; margin:0 0 10px;">'
+    f'The planets move in their path, and so does your destiny.</p>',
+    unsafe_allow_html=True,
+)
+
 topbar_l, topbar_r = st.columns([4, 1])
 with topbar_l:
     st.markdown(
@@ -4473,7 +4572,16 @@ if is_premium(st.session_state["user"]["id"]):
         unsafe_allow_html=True,
     )
 
-render_dashboard_hero(st.session_state["user"]["username"])
+saved_profile = load_profile(st.session_state["user"]["id"])
+name, dob, tob, city, cast, save_clicked, save_label = render_dashboard_hero(
+    st.session_state["user"]["username"], saved_profile
+)
+if save_clicked:
+    save_chart_to_library(
+        st.session_state["user"]["id"], save_label.strip() or "Untitled chart", name,
+        dob.isoformat(), tob.isoformat(), city[0], city[1], city[2], city[3], city[4],
+    )
+    st.success(f"Saved \u201c{save_label.strip() or 'Untitled chart'}\u201d to your chart library.")
 render_todays_snapshot(_dash_lat, _dash_lon, _dash_tz, _dash_city)
 
 
@@ -4481,145 +4589,11 @@ if PAYMENT_TEST_MODE:
     st.markdown(
         '<div style="background:#FCE8E6;border:1px solid #D93025;border-radius:8px;'
         'padding:8px 16px;margin-bottom:14px;color:#D93025;font-size:14px;font-weight:600;">'
-        '🧪 TEST MODE — payments are simulated. No real money moves. '
+        '\U0001f9ea TEST MODE \u2014 payments are simulated. No real money moves. '
         'Add real Razorpay keys (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, APP_BASE_URL) to go live.'
         '</div>',
         unsafe_allow_html=True,
     )
-
-# ---- Load this user's saved birth details, if any, as form defaults -------
-saved_profile = load_profile(st.session_state["user"]["id"])
-
-# ---- Birth details form -------------------------------------------------
-st.markdown('<div class="kcard"><h4>Birth details</h4>', unsafe_allow_html=True)
-
-place_mode = st.radio(
-    "Birth place source",
-    ["Quick-pick from city list", "Search worldwide (any place)", "Enter coordinates manually"],
-    horizontal=True, label_visibility="collapsed",
-)
-
-col1, col2, col3, col4, col5 = st.columns([1.2, 1.6, 1, 1, 0.8])
-
-with col1:
-    name = st.text_input("Name", value=(saved_profile["name"] if saved_profile else ""), placeholder="Name of chart")
-
-# col3/col4 (date & time) are populated here in the code, ahead of col2 (place),
-# purely so the worldwide-search branch below can use the exact birth date/time
-# for a historically-accurate timezone lookup. st.columns() already fixed each
-# column's left-to-right screen position, so the on-screen layout is unaffected
-# by this reordering — only the code execution order changes.
-with col3:
-    default_dob = date.fromisoformat(saved_profile["dob"]) if (saved_profile and saved_profile.get("dob")) else date(2026, 7, 16)
-    dob = st.date_input(
-        "Date of birth", value=default_dob,
-        min_value=date(1900, 1, 1), max_value=date(2100, 12, 31),
-    )
-
-with col4:
-    # st.time_input's native browser widget often only allows clicking spinner
-    # arrows, not typing digits directly. Plain number_input boxes are always
-    # typable, so hour/minute/second are entered as three separate fields
-    # and combined into a time object below.
-    default_tob = dtime.fromisoformat(saved_profile["tob"]) if (saved_profile and saved_profile.get("tob")) else dtime(12, 16, 0)
-    st.markdown('<p style="margin-bottom:2px;">Time (24h, local)</p>', unsafe_allow_html=True)
-    th_col, tm_col, ts_col = st.columns(3)
-    with th_col:
-        tob_hour = st.number_input(
-            "Hour", min_value=0, max_value=23, value=default_tob.hour, step=1, key="tob_hour"
-        )
-    with tm_col:
-        tob_minute = st.number_input(
-            "Minute", min_value=0, max_value=59, value=default_tob.minute, step=1, key="tob_minute"
-        )
-    with ts_col:
-        tob_second = st.number_input(
-            "Second", min_value=0, max_value=59, value=default_tob.second, step=1, key="tob_second"
-        )
-    tob = dtime(int(tob_hour), int(tob_minute), int(tob_second))
-
-if place_mode == "Enter coordinates manually":
-    default_place = saved_profile["city_name"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else ""
-    default_mlat = saved_profile["lat"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 30.21
-    default_mlon = saved_profile["lon"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 74.95
-    default_mtz = saved_profile["tz"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 5.5
-    with col2:
-        place_name = st.text_input("Place name (for display only)", value=default_place, placeholder="e.g. Custom Town")
-        mcol1, mcol2, mcol3 = st.columns(3)
-        with mcol1:
-            manual_lat = st.number_input(
-                "Latitude", min_value=-90.0, max_value=90.0, value=float(default_mlat), step=0.0001, format="%.4f"
-            )
-        with mcol2:
-            manual_lon = st.number_input(
-                "Longitude", min_value=-180.0, max_value=180.0, value=float(default_mlon), step=0.0001, format="%.4f"
-            )
-        with mcol3:
-            manual_tz = st.number_input(
-                "UTC offset (h)", min_value=-12.0, max_value=14.0, value=float(default_mtz), step=0.25, format="%.2f"
-            )
-        st.caption(
-            f"{abs(manual_lat):.4f}°{'N' if manual_lat >= 0 else 'S'}, "
-            f"{abs(manual_lon):.4f}°{'E' if manual_lon >= 0 else 'W'} · "
-            f"UTC{'+' if manual_tz >= 0 else ''}{manual_tz}"
-        )
-    city = (place_name if place_name else "Custom location", "Manual entry", manual_lat, manual_lon, manual_tz)
-
-elif place_mode == "Search worldwide (any place)":
-    # Live global place search (OpenStreetMap Nominatim) + offline historical
-    # timezone lookup — covers essentially any city, town, or village on
-    # Earth, rather than only the ~90 places hardcoded in the quick-pick list.
-    with col2:
-        default_query = saved_profile["city_name"] if (saved_profile and saved_profile.get("city_region") == "Worldwide search") else ""
-        search_query = st.text_input(
-            "Birth place (any city, town, or village worldwide)",
-            value=default_query, placeholder="e.g. Hanumangarh, Rajasthan, India",
-        )
-        results = geocode_place(search_query) if search_query.strip() else []
-        if search_query.strip() and not results:
-            st.caption("No matches found (or the search is temporarily unreachable) — "
-                       "try a more specific query, or use Quick-pick / manual entry instead.")
-        if results:
-            result_labels = [r["display_name"] for r in results]
-            chosen_result_label = st.selectbox("Match", result_labels, label_visibility="collapsed")
-            chosen_result = results[result_labels.index(chosen_result_label)]
-            w_lat, w_lon = chosen_result["lat"], chosen_result["lon"]
-            w_tz = get_historical_utc_offset(
-                w_lat, w_lon, dob.year, dob.month, dob.day, tob.hour, tob.minute, tob.second
-            )
-            display_name = chosen_result["display_name"]
-            st.caption(
-                f"{abs(w_lat):.4f}°{'N' if w_lat >= 0 else 'S'}, "
-                f"{abs(w_lon):.4f}°{'E' if w_lon >= 0 else 'W'} · "
-                f"UTC{'+' if w_tz >= 0 else ''}{w_tz:.2f} on this date"
-                + ("" if HAS_TZFINDER else " (rough estimate — install `timezonefinder` for accuracy)")
-            )
-            city = (display_name.split(",")[0].strip(), display_name, w_lat, w_lon, w_tz)
-        else:
-            # nothing searched/selected yet — safe placeholder so the rest of
-            # the app still has a valid city tuple to compute a default chart from
-            city = ("Bathinda", "Punjab, India", 30.21, 74.95, 5.5)
-
-else:
-    default_city_query = saved_profile["city_name"] if (saved_profile and saved_profile.get("city_region") not in ("Manual entry", "Worldwide search")) else "Bathinda"
-    with col2:
-        city_query = st.text_input("Birth place (city)", value=default_city_query)
-        matches = [c for c in CITIES if city_query.lower() in (c[0] + " " + c[1]).lower()]
-        if not matches:
-            matches = CITIES[:8]
-        city_labels = [f"{c[0]} · {c[1]}" for c in matches[:8]]
-        chosen_label = st.selectbox("Match", city_labels, label_visibility="collapsed")
-        city = matches[city_labels.index(chosen_label)]
-        st.caption(
-            f"{abs(city[2]):.2f}°{'N' if city[2] >= 0 else 'S'}, "
-            f"{abs(city[3]):.2f}°{'E' if city[3] >= 0 else 'W'} · UTC{'+' if city[4] >= 0 else ''}{city[4]}"
-        )
-
-with col5:
-    st.markdown("<br>", unsafe_allow_html=True)
-    cast = st.button("Cast chart", use_container_width=True)
-
-st.markdown("</div>", unsafe_allow_html=True)
 
 # ---- Free-tier daily chart-generation limit --------------------------------
 _user_id_for_limit = st.session_state["user"]["id"]
