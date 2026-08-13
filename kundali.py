@@ -1949,10 +1949,10 @@ def _solid_sphere_svg(parts, defs, grad_id, cx, cy, r, base_hex, highlight_hex, 
 # ---- Poster planet colours (base, highlight), matched to the provided
 # design's exact gradients, reused via the existing _solid_sphere_svg helper.
 POSTER_PLANET_COLORS = {
-    "Su": ("#E67E22", "#FFD6A8"), "Mo": ("#D8D8D8", "#FFFFFF"),
+    "Su": ("#E74C3C", "#FFADA0"), "Mo": ("#D8D8D8", "#FFFFFF"),
     "Ma": ("#E74C3C", "#FF9E8F"), "Me": ("#2ECC71", "#B8F5D0"),
-    "Jp": ("#a56825", "#f1d59a"), "Ve": ("#F1948A", "#FFD9D4"),
-    "Sa": ("#a47c42", "#ead4a1"), "Ra": ("#8E44AD", "#D8B8E8"),
+    "Jp": ("#F1C40F", "#FFF3B0"), "Ve": ("#F1948A", "#FFD9D4"),
+    "Sa": ("#8B5E3C", "#D8B98A"), "Ra": ("#8E44AD", "#D8B8E8"),
     "Ke": ("#95A5A6", "#E0E5E5"),
 }
 POSTER_PLANET_NAMES = {
@@ -1961,15 +1961,15 @@ POSTER_PLANET_NAMES = {
 }
 # (key, radius_fraction_of_canvas, angle_degrees, size_fraction, has_rings)
 POSTER_PLANET_LAYOUT = [
-    ("Su", 0.42, 35, 0.095, False),
-    ("Mo", 0.44, 340, 0.045, False),
-    ("Ma", 0.30, 70, 0.048, False),
-    ("Me", 0.34, 340, 0.045, False),
-    ("Jp", 0.34, 105, 0.070, False),
-    ("Ve", 0.30, 195, 0.058, False),
-    ("Sa", 0.44, 240, 0.068, True),
-    ("Ra", 0.30, 290, 0.052, False),
-    ("Ke", 0.44, 160, 0.045, False),
+    ("Su", 0.290, 122.4, 0.115, False),
+    ("Mo", 0.275, 289.1, 0.065, False),
+    ("Ma", 0.238, 71.5, 0.068, False),
+    ("Me", 0.239, 253.4, 0.062, False),
+    ("Jp", 0.324, 210.0, 0.135, False),
+    ("Ve", 0.341, 164.2, 0.085, False),
+    ("Sa", 0.340, 341.7, 0.098, True),
+    ("Ra", 0.398, 25.0, 0.075, False),
+    ("Ke", 0.238, 29.5, 0.063, False),
 ]
 
 
@@ -1983,7 +1983,7 @@ def build_planetspath_solar_svg(size: int = 760) -> str:
     cx = cy = size / 2
     defs = []
     parts = [f'<svg viewBox="0 0 {size} {size}" width="{size}" height="{size}" '
-             f'xmlns="http://www.w3.org/2000/svg" style="display:block;max-width:100%;height:auto;">']
+             f'xmlns="http://www.w3.org/2000/svg" style="display:block;max-width:100%;">']
 
     def pt(r, deg):
         rad = math.radians(deg - 90)
@@ -2010,17 +2010,17 @@ def build_planetspath_solar_svg(size: int = 760) -> str:
         parts.append(f'<circle cx="{cx}" cy="{cy}" r="{size*r_frac:.1f}" fill="none" stroke="#D8A845" '
                       f'stroke-width="1" stroke-dasharray="2,9" opacity="0.4"/>')
 
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{size*0.19:.1f}" fill="url(#ppOmGlow)"/>')
-    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{size*0.135:.1f}" fill="#FFFDF3" stroke="#B8842E" stroke-width="2.5"/>')
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{size*0.23:.1f}" fill="url(#ppOmGlow)"/>')
+    parts.append(f'<circle cx="{cx}" cy="{cy}" r="{size*0.16:.1f}" fill="#FFFDF3" stroke="#B8842E" stroke-width="3"/>')
     OM_FONTS = ("'Noto Sans Devanagari','Nirmala UI','Kohinoor Devanagari',"
                 "'Devanagari Sangam MN','Mangal',sans-serif")
     parts.append(f'<text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="central" '
-                 f'font-size="{size*0.145:.1f}" fill="url(#ppOmGold)" font-family="{OM_FONTS}" '
+                 f'font-size="{size*0.17:.1f}" fill="url(#ppOmGold)" font-family="{OM_FONTS}" '
                  f'filter="url(#ppOmShadow)">\u0950</text>')
-    sx, sy = pt(size * 0.165, 0)
-    parts.append(f'<text x="{sx:.1f}" y="{sy:.1f}" text-anchor="middle" font-size="20" fill="#dfa72f">\u2726</text>')
-    sx2, sy2 = pt(size * 0.165, 180)
-    parts.append(f'<text x="{sx2:.1f}" y="{sy2:.1f}" text-anchor="middle" font-size="20" fill="#dfa72f">\u2726</text>')
+    sx, sy = pt(size * 0.19, 0)
+    parts.append(f'<text x="{sx:.1f}" y="{sy:.1f}" text-anchor="middle" font-size="22" fill="#dfa72f">\u2726</text>')
+    sx2, sy2 = pt(size * 0.19, 180)
+    parts.append(f'<text x="{sx2:.1f}" y="{sy2:.1f}" text-anchor="middle" font-size="22" fill="#dfa72f">\u2726</text>')
 
     for key, r_frac, angle, sz_frac, has_rings in POSTER_PLANET_LAYOUT:
         px, py = pt(size * r_frac, angle)
@@ -2029,9 +2029,9 @@ def build_planetspath_solar_svg(size: int = 760) -> str:
         if key == "Su":
             defs.append(
                 '<radialGradient id="ppSunFlare" cx="50%" cy="50%" r="60%">'
-                '<stop offset="0%" stop-color="#FFCB8A" stop-opacity="0.9"/>'
-                '<stop offset="60%" stop-color="#F5A25C" stop-opacity="0.25"/>'
-                '<stop offset="100%" stop-color="#F5A25C" stop-opacity="0"/></radialGradient>'
+                '<stop offset="0%" stop-color="#FFB3A0" stop-opacity="0.9"/>'
+                '<stop offset="60%" stop-color="#F5745C" stop-opacity="0.25"/>'
+                '<stop offset="100%" stop-color="#F5745C" stop-opacity="0"/></radialGradient>'
             )
             parts.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="{r*2.1:.1f}" fill="url(#ppSunFlare)"/>')
         if has_rings:
@@ -2039,13 +2039,19 @@ def build_planetspath_solar_svg(size: int = 760) -> str:
                           f'fill="none" stroke="#B8842E" stroke-width="{r*0.12:.1f}" opacity="0.6" '
                           f'transform="rotate(-18 {px:.1f} {py:.1f})"/>')
         _solid_sphere_svg(parts, defs, f"ppSph_{key}", px, py, r, base_hex, hi_hex)
-        label_x = px + r + 8
         label_text = POSTER_PLANET_NAMES[key]
         label_w = len(label_text) * 7.0 + 20
+        points_left = px < cx
+        if points_left:
+            label_x = px - r - 8 - label_w
+            dot_x, text_x, text_anchor = label_x + label_w - 10, label_x + label_w - 18, "end"
+        else:
+            label_x = px + r + 8
+            dot_x, text_x, text_anchor = label_x + 10, label_x + 18, "start"
         parts.append(f'<rect x="{label_x:.1f}" y="{py-10:.1f}" width="{label_w:.1f}" height="20" rx="10" '
                       f'fill="#FFFDF3" stroke="#F0DE94" stroke-width="1" opacity="0.95"/>')
-        parts.append(f'<circle cx="{label_x+10:.1f}" cy="{py:.1f}" r="2.5" fill="{base_hex}"/>')
-        parts.append(f'<text x="{label_x+18:.1f}" y="{py:.1f}" dominant-baseline="middle" '
+        parts.append(f'<circle cx="{dot_x:.1f}" cy="{py:.1f}" r="2.5" fill="{base_hex}"/>')
+        parts.append(f'<text x="{text_x:.1f}" y="{py:.1f}" dominant-baseline="middle" text-anchor="{text_anchor}" '
                       f'font-size="11.5" fill="#3A2E1F" font-family="Georgia, serif">{label_text}</text>')
 
     svg_open = parts[0]
@@ -2256,8 +2262,8 @@ def render_auth_screen():
 
         with tab_signup:
             su_username = st.text_input("Username (3-20 letters/numbers/underscore)", key="su_username")
-            su_email = st.text_input("Email (optional)", key="su_email", placeholder="you@example.com")
-            su_phone = st.text_input("Phone number (optional)", key="su_phone", placeholder="+91 98765 43210")
+            su_email = st.text_input("Email (enter this or phone number below)", key="su_email", placeholder="you@example.com")
+            su_phone = st.text_input("Phone number (enter this or email above)", key="su_phone", placeholder="+91 98765 43210")
             su_pw = st.text_input("Password (min 8 characters)", type="password", key="su_pw")
             su_pw2 = st.text_input("Confirm password", type="password", key="su_pw2")
             su_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", key="su_terms")
@@ -2279,6 +2285,8 @@ def render_auth_screen():
                         errors.append("Enter a valid phone number (7-15 digits, optional + prefix), or leave it blank.")
                     elif phone_taken(su_phone_clean):
                         errors.append("That phone number is already registered — try logging in instead.")
+                if not su_email_clean and not su_phone_clean:
+                    errors.append("Enter at least one of Email or Phone number.")
                 if len(su_pw or "") < 8:
                     errors.append("Password must be at least 8 characters.")
                 if su_pw != su_pw2:
