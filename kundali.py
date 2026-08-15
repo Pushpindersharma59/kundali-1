@@ -4492,9 +4492,31 @@ def render_dashboard_hero(username: str, saved_profile):
     )
     hero_l, hero_r = st.columns([1, 1.1])
 
+    _load = st.session_state.pop("_load_chart_override", None)
+    if _load:
+        # Guaranteed-reliable way to programmatically set a Streamlit widget's
+        # value: write directly to session_state[key] BEFORE that widget is
+        # instantiated. Forces "Enter coordinates manually" so the loaded
+        # chart's exact saved lat/lon/tz is restored precisely, rather than
+        # trying to reverse-engineer a matching quick-pick city or search query.
+        st.session_state["hero_name"] = _load["name"]
+        st.session_state["hero_gender"] = _load.get("gender") if _load.get("gender") in ("Male", "Female") else "Male"
+        st.session_state["hero_dob"] = _load["dob"]
+        st.session_state["tob_hour"] = _load["tob"].hour
+        st.session_state["tob_minute"] = _load["tob"].minute
+        st.session_state["tob_second"] = _load["tob"].second
+        st.session_state["hero_place_mode"] = "Enter coordinates manually"
+        st.session_state["hero_manual_place_name"] = _load["city"][0]
+        st.session_state["hero_manual_lat"] = float(_load["city"][2])
+        st.session_state["hero_manual_lon"] = float(_load["city"][3])
+        st.session_state["hero_manual_tz"] = float(_load["city"][4])
+        st.session_state["_just_loaded_chart"] = True
+        st.success(f"Loaded \u201c{_load['label']}\u201d \u2014 scroll down to see the chart.")
+
     with hero_l:
         st.markdown(f'<h4 style="margin-bottom:10px;">Birth Details</h4>', unsafe_allow_html=True)
-        name = st.text_input("Name", value=(saved_profile["name"] if saved_profile else ""), placeholder="Name of chart")
+        default_name = saved_profile["name"] if saved_profile else ""
+        name = st.text_input("Name", value=default_name, placeholder="Name of chart", key="hero_name")
 
         gender_options = ["Male", "Female"]
         default_gender = saved_profile.get("gender") if saved_profile else None
@@ -4504,7 +4526,7 @@ def render_dashboard_hero(username: str, saved_profile):
         default_dob = date.fromisoformat(saved_profile["dob"]) if (saved_profile and saved_profile.get("dob")) else date(2026, 7, 16)
         dob = st.date_input(
             "Date of birth", value=default_dob,
-            min_value=date(1900, 1, 1), max_value=date(2100, 12, 31),
+            min_value=date(1900, 1, 1), max_value=date(2100, 12, 31), key="hero_dob",
         )
 
         default_tob = dtime.fromisoformat(saved_profile["tob"]) if (saved_profile and saved_profile.get("tob")) else dtime(12, 16, 0)
@@ -4529,10 +4551,10 @@ def render_dashboard_hero(username: str, saved_profile):
             default_mlat = saved_profile["lat"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 30.21
             default_mlon = saved_profile["lon"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 74.95
             default_mtz = saved_profile["tz"] if (saved_profile and saved_profile.get("city_region") == "Manual entry") else 5.5
-            place_name = st.text_input("Place name (for display only)", value=default_place, placeholder="e.g. Custom Town")
-            manual_lat = st.number_input("Latitude", min_value=-90.0, max_value=90.0, value=float(default_mlat), step=0.0001, format="%.4f")
-            manual_lon = st.number_input("Longitude", min_value=-180.0, max_value=180.0, value=float(default_mlon), step=0.0001, format="%.4f")
-            manual_tz = st.number_input("UTC offset (h)", min_value=-12.0, max_value=14.0, value=float(default_mtz), step=0.25, format="%.2f")
+            place_name = st.text_input("Place name (for display only)", value=default_place, placeholder="e.g. Custom Town", key="hero_manual_place_name")
+            manual_lat = st.number_input("Latitude", min_value=-90.0, max_value=90.0, value=float(default_mlat), step=0.0001, format="%.4f", key="hero_manual_lat")
+            manual_lon = st.number_input("Longitude", min_value=-180.0, max_value=180.0, value=float(default_mlon), step=0.0001, format="%.4f", key="hero_manual_lon")
+            manual_tz = st.number_input("UTC offset (h)", min_value=-12.0, max_value=14.0, value=float(default_mtz), step=0.25, format="%.2f", key="hero_manual_tz")
             st.caption(
                 f"{abs(manual_lat):.4f}°{'N' if manual_lat >= 0 else 'S'}, "
                 f"{abs(manual_lon):.4f}°{'E' if manual_lon >= 0 else 'W'} · "
@@ -4952,8 +4974,9 @@ if not _premium_for_limit:
     )
 
 # Keep last-cast form in session_state so the chart persists across reruns
-_want_new_chart = "form" not in st.session_state or cast
-if _want_new_chart and _limit_reached:
+_just_loaded = st.session_state.pop("_just_loaded_chart", False)
+_want_new_chart = "form" not in st.session_state or cast or _just_loaded
+if _want_new_chart and _limit_reached and not _just_loaded:
     st.warning(
         f"⭐ You've used all {FREE_DAILY_LIMIT} free chart generations for today. "
         "Upgrade to Premium below for unlimited charts, or come back tomorrow."
@@ -4975,7 +4998,7 @@ elif _want_new_chart:
             st.session_state["user"]["id"], name, dob.isoformat(), tob.isoformat(),
             city[0], city[1], city[2], city[3], city[4], gender,
         )
-    if not _premium_for_limit:
+    if cast and not _premium_for_limit:
         increment_usage(_user_id_for_limit)
 form = st.session_state["form"]
 
@@ -5514,8 +5537,9 @@ if is_premium(user_id):
                 )
             with row_load:
                 if st.button("Load", key=f"load_chart_{sc['id']}", use_container_width=True):
-                    st.session_state["form"] = {
-                        "name": sc["name"] or "", "dob": sc_dob, "tob": sc_tob,
+                    st.session_state["_load_chart_override"] = {
+                        "label": sc["label"], "name": sc["name"] or "", "gender": sc["gender"] if "gender" in sc.keys() else None,
+                        "dob": sc_dob, "tob": sc_tob,
                         "city": (sc["city_name"], sc["city_region"], sc["lat"], sc["lon"], sc["tz"]),
                     }
                     st.rerun()
