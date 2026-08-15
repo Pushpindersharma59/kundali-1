@@ -5040,6 +5040,15 @@ _chart_language = st.session_state.get("chart_language", "English")
 _chart_show_transits = st.session_state.get("chart_show_transits", True)
 
 # ---- Row 1: Diamond chart + Circular chart, each with its own D1..D60 selector ----
+st.markdown('<div id="main-kundali-chart"></div>', unsafe_allow_html=True)
+if _just_loaded:
+    st.components.v1.html(
+        """<script>
+        window.parent.document.getElementById('main-kundali-chart')
+            .scrollIntoView({behavior: 'smooth', block: 'start'});
+        </script>""",
+        height=0,
+    )
 c1, c2 = st.columns([1, 1])
 
 # Divisional (varga) charts beyond D1 are a premium feature — free accounts
