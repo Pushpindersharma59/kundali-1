@@ -2122,13 +2122,13 @@ def render_planetspath_solar_with_features():
 
 FEATURE_STRIP = [
     ("\u25c8", "Kundali Analysis", "Detailed insights from your real birth chart"),
-    ("\u2728", "Nakshatra Guide", "27 nakshatras — deities, symbols & meanings"),
-    ("\U0001fa90", "Planetary Transits", "Live planetary movements, updated in real time"),
-    ("\u25c9", "Divisional Charts", "D1 through D60 varga charts, generated instantly"),
-    ("\u25a6", "Navtara Chakra", "Auspicious-day calendar based on your own nakshatra"),
-    ("\u2302", "Graha Maitri & Trikona", "Planetary friendships and house groupings by element"),
-    ("\u2740", "Day-wise Remedies", "Gemstones, colours & practices for each weekday"),
-    ("\u25a3", "PDF Report", "A downloadable, professional Kundali report"),
+    ("\U0001f504", "Nakshatra Live & Transits", "Today's tithi, nakshatra, and live planetary positions"),
+    ("\U0001f4ff", "Day-wise Remedies", "Gemstones, colours & practices for each weekday"),
+    ("\U0001f319", "Navtara Chakra", "Auspicious-day calendar based on your own nakshatra"),
+    ("\U0001f549\ufe0f", "Panchang & Muhurta", "Daily panchang, hora timings, and auspicious windows"),
+    ("\U0001f49e", "Compatibility", "Match your kundali against a partner's, graha by graha"),
+    ("\U0001f4c1", "Charts", "Save, revisit, and manage your birth charts"),
+    ("\U0001f522", "Numerology", "Life Path, Destiny, Soul Urge — Pythagorean and Chaldean"),
 ]
 
 
@@ -5004,9 +5004,6 @@ if save_clicked:
     )
     st.success(f"Saved \u201c{save_label.strip() or 'Untitled chart'}\u201d to your chart library.")
 render_todays_snapshot(_dash_lat, _dash_lon, _dash_tz, _dash_city)
-
-if is_premium(st.session_state["user"]["id"]):
-    render_dashboard_hub()
 
 
 if PAYMENT_TEST_MODE:
