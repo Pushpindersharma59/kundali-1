@@ -4674,6 +4674,61 @@ def render_todays_snapshot(lat: float, lon: float, tz: float, city_name: str):
     )
 
 
+DASHBOARD_HUB_CARDS = [
+    ("\U0001f504", "Nakshatra Live & Transits", "See today's tithi, nakshatra, and live planetary positions.",
+     "#section-transit", "#E3F2FD", "#1565C0"),
+    ("\U0001f4ff", "Day-wise Remedies", "Gemstones, colours, and practices for each weekday.",
+     "#section-remedies", "#E8F5E9", "#2E7D32"),
+    ("\U0001f319", "Navtara Chakra", "Your auspicious-day calendar, based on your own nakshatra.",
+     "#section-navtara", "#F3E5F5", "#6A1B9A"),
+    ("\U0001f549\ufe0f", "Panchang & Muhurta", "Daily panchang, hora timings, and auspicious windows.",
+     "#section-muhurta", "#FFF8E1", "#B8860B"),
+    ("\U0001f49e", "Compatibility", "Match your kundali against a partner's, graha by graha.",
+     "#section-compat", "#FCE4EC", "#AD1457"),
+    ("\U0001f4c1", "Charts", "Your saved birth charts — load, revisit, or delete any of them.",
+     "#section-charts", "#FFF3E0", "#E65100"),
+    ("\U0001f522", "Numerology", "Life Path, Destiny, Soul Urge, and more — Pythagorean and Chaldean.",
+     "#section-numerology", "#E0F7FA", "#00695C"),
+]
+
+
+def render_dashboard_hub():
+    """A visual, card-based home for the dashboard — click any card to jump
+    straight to that section (same anchors the top nav bar already uses),
+    just presented as an inviting light-coloured grid instead of plain text
+    links. Built as an HTML table rather than CSS grid/flex, since this
+    codebase found CSS grid unreliable across renderers earlier and a table
+    is guaranteed to lay out identically everywhere."""
+    st.markdown(f'<p style="color:{C["gold"]};font-weight:700;font-size:19px;margin:4px 0 10px;">\u2728 Your Dashboard</p>', unsafe_allow_html=True)
+
+    def _hub_card(icon, title, desc, href, bg, fg):
+        return (
+            f'<td style="width:25%;padding:7px;vertical-align:top;">'
+            f'<a href="{href}" style="text-decoration:none;">'
+            f'<div style="background:{bg}; border:1px solid {fg}33; border-radius:16px; padding:18px 16px; '
+            f'min-height:128px; transition:transform 0.15s;">'
+            f'<div style="font-size:30px;margin-bottom:8px;">{icon}</div>'
+            f'<div style="font-weight:700; color:{fg}; font-size:15px; margin-bottom:4px;">{title}</div>'
+            f'<div style="color:{fg}cc; font-size:12.5px; line-height:1.4;">{desc}</div>'
+            f'</div></a></td>'
+        )
+
+    cards = DASHBOARD_HUB_CARDS
+    rows_html = []
+    for i in range(0, len(cards), 4):
+        row_cards = cards[i:i + 4]
+        row_html = "".join(_hub_card(*c) for c in row_cards)
+        if len(row_cards) < 4:
+            row_html += '<td style="width:25%;"></td>' * (4 - len(row_cards))
+        rows_html.append(f"<tr>{row_html}</tr>")
+
+    st.markdown(
+        f'<table style="width:100%; border-collapse:separate; border-spacing:0; margin-bottom:18px;">'
+        f'{"".join(rows_html)}</table>',
+        unsafe_allow_html=True,
+    )
+
+
 def render_nakshatra_live_clock(lat: float, lon: float, tz: float):
     """A self-updating 'live clock' card: current tithi, current nakshatra
     with its 4 padas, and a live-ticking indicator of which pada is active
@@ -4949,6 +5004,9 @@ if save_clicked:
     )
     st.success(f"Saved \u201c{save_label.strip() or 'Untitled chart'}\u201d to your chart library.")
 render_todays_snapshot(_dash_lat, _dash_lon, _dash_tz, _dash_city)
+
+if is_premium(st.session_state["user"]["id"]):
+    render_dashboard_hub()
 
 
 if PAYMENT_TEST_MODE:
