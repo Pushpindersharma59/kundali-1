@@ -2071,13 +2071,16 @@ def render_planetspath_solar_with_features():
     empty. No chevron arrows — these are informational, not links."""
     solar_svg = build_planetspath_solar_svg(620)
 
-    def _cell(icon, title, desc, valign="top"):
-        return (
-            f'<td class="pp-grid-cell" style="vertical-align:{valign};"><div class="pp-mini-feature">'
+    def _cell(icon, title, desc, section_id, valign="top"):
+        inner = (
+            f'<div class="pp-mini-feature{" pp-mini-clickable" if section_id else ""}">'
             f'<div class="pp-mini-icon">{icon}</div>'
             f'<div><div class="pp-mini-title">{title.upper()}</div>'
-            f'<div class="pp-mini-text">{desc}</div></div></div></td>'
+            f'<div class="pp-mini-text">{desc}</div></div></div>'
         )
+        if section_id:
+            inner = f'<a href="?goto={section_id}" target="_self" style="text-decoration:none;color:inherit;">{inner}</a>'
+        return f'<td class="pp-grid-cell" style="vertical-align:{valign};">{inner}</td>'
 
     f = FEATURE_STRIP
     rows_html = (
@@ -2098,6 +2101,10 @@ def render_planetspath_solar_with_features():
             background:rgba(255,255,255,.92); border:1px solid #eadfca; border-radius:16px;
             padding:16px 18px; display:flex; align-items:center; gap:14px;
             box-shadow:0 2px 8px rgba(104,82,40,.06); min-height:96px;
+            transition: box-shadow 0.15s, border-color 0.15s, transform 0.15s;
+        }}
+        .pp-mini-clickable:hover {{
+            box-shadow:0 6px 16px rgba(104,82,40,.14); border-color:#d8a845; transform:translateY(-2px);
         }}
         .pp-mini-solar {{ width:300px; height:300px; margin:0 auto; }}
         .pp-mini-solar svg {{ width:300px !important; height:300px !important; }}
@@ -2121,14 +2128,14 @@ def render_planetspath_solar_with_features():
 
 
 FEATURE_STRIP = [
-    ("\u25c8", "Kundali Analysis", "Detailed insights from your real birth chart"),
-    ("\U0001f504", "Nakshatra Live & Transits", "Today's tithi, nakshatra, and live planetary positions"),
-    ("\U0001f4ff", "Day-wise Remedies", "Gemstones, colours & practices for each weekday"),
-    ("\U0001f319", "Navtara Chakra", "Auspicious-day calendar based on your own nakshatra"),
-    ("\U0001f549\ufe0f", "Panchang & Muhurta", "Daily panchang, hora timings, and auspicious windows"),
-    ("\U0001f49e", "Compatibility", "Match your kundali against a partner's, graha by graha"),
-    ("\U0001f4c1", "Charts", "Save, revisit, and manage your birth charts"),
-    ("\U0001f522", "Numerology", "Life Path, Destiny, Soul Urge — Pythagorean and Chaldean"),
+    ("\u25c8", "Kundali Analysis", "Detailed insights from your real birth chart", None),
+    ("\U0001f504", "Nakshatra Live & Transits", "Today's tithi, nakshatra, and live planetary positions", "section-transit"),
+    ("\U0001f4ff", "Day-wise Remedies", "Gemstones, colours & practices for each weekday", "section-remedies"),
+    ("\U0001f319", "Navtara Chakra", "Auspicious-day calendar based on your own nakshatra", "section-navtara"),
+    ("\U0001f549\ufe0f", "Panchang & Muhurta", "Daily panchang, hora timings, and auspicious windows", "section-muhurta"),
+    ("\U0001f49e", "Compatibility", "Match your kundali against a partner's, graha by graha", "section-compat"),
+    ("\U0001f4c1", "Charts", "Save, revisit, and manage your birth charts", "section-charts"),
+    ("\U0001f522", "Numerology", "Life Path, Destiny, Soul Urge — Pythagorean and Chaldean", "section-numerology"),
 ]
 
 
@@ -4922,6 +4929,11 @@ if "user" not in st.session_state:
     render_auth_screen()
     st.stop()
 
+_goto = st.query_params.get("goto")
+if _goto:
+    st.session_state["_scroll_to_section"] = _goto
+    st.query_params.pop("goto", None)
+
 handle_razorpay_return()
 if st.session_state.pop("just_upgraded", False):
     st.success("Payment verified — premium unlocked! 🎉")
@@ -6111,3 +6123,13 @@ st.markdown(
 )
 
 st.caption("Tip: click **🔄 Refresh transits** any time to update the red transit positions to right now.")
+
+_scroll_target = st.session_state.pop("_scroll_to_section", None)
+if _scroll_target:
+    st.components.v1.html(
+        f"""<script>
+        var el = window.parent.document.getElementById('{_scroll_target}');
+        if (el) {{ el.scrollIntoView({{behavior: 'smooth', block: 'start'}}); }}
+        </script>""",
+        height=0,
+    )
