@@ -1853,18 +1853,45 @@ def render_advanced_chart_features(birth_chart: dict, birth_bodies: list, asc_si
 
 
 BCP_HOUSE_ROLE_STYLE = {
-    "activated": ("#0d3838", "#1e5f5f", "3"), "argala": ("#c0392b", "#e74c3c", "1.5"),
+    "argala": ("#c0392b", "#e74c3c", "1.5"),
     "virodha": ("#7a7a7a", "#999999", "1.5"), "swami": ("#5b3fa0", "#8e6fd6", "2"),
 }
+BCP_GOOD_STYLE = ("#1e7b3f", "#1e7b3f", "3")
+BCP_CAUTION_STYLE = ("#a83232", "#a83232", "3")
+
+
+def compute_bcp_favorability(birth_bodies: list, asc_sign: int, activated_house: int, mks_houses: dict) -> dict:
+    """A simplified, clearly-labelled heuristic for whether the activated
+    house looks broadly favourable or one to be careful with: caution if
+    it's a Dusthana (6th/8th/12th from ascendant), its natal lord is
+    debilitated, or it hosts a Māraka Kāraka Sthāna lord — otherwise
+    treated as favourable. This is an interpretive simplification, not a
+    classical predictive verdict."""
+    reasons = []
+    is_dusthana = activated_house in (6, 8, 12)
+    if is_dusthana:
+        reasons.append(f"House {activated_house} is a Dusthana (6th/8th/12th)")
+    activated_sign = (asc_sign + activated_house - 1) % 12
+    lord_key = RASHI_LORD.get(activated_sign)
+    lord_body = next((b for b in birth_bodies if b["key"] == lord_key), None)
+    lord_debilitated = lord_body is not None and graha_dignity(lord_key, lord_body["sign"]) == "Debilitated"
+    if lord_debilitated:
+        reasons.append(f"House lord {lord_key} is debilitated")
+    has_mks = any(info["placed_sign"] == activated_sign for info in mks_houses.values())
+    if has_mks:
+        reasons.append("A M\u0101raka (2nd/7th) lord sits in this house")
+    favorable = not (is_dusthana or lord_debilitated or has_mks)
+    return {"favorable": favorable, "reasons": reasons}
 
 
 def build_bcp_activated_svg(birth_bodies, transit_bodies, asc_sign, bcp, argala, swami_house, mks_houses):
     """A diamond chart with BCP roles overlaid as coloured house borders:
-    the activated house (teal, solid), Argala houses (red, dashed), Virodha
-    houses (grey, dashed), and the Chakra Swami's house (violet), plus BCP/
-    SWAMI/MKS/DG badges — built on the same overlap-free per-house layout
-    already proven in build_advanced_kundali_svg."""
-    size = 700
+    the activated house in green (favourable) or red (use caution) per
+    compute_bcp_favorability, Argala houses (red, dashed), Virodha houses
+    (grey, dashed), and the Chakra Swami's house (violet), plus BCP/SWAMI/
+    MKS/DG badges — built on the same overlap-free per-house layout already
+    proven in build_advanced_kundali_svg."""
+    size = 900
     parts = [f'<svg viewBox="0 0 {size} {size}" width="{size}" height="{size}" '
              f'xmlns="http://www.w3.org/2000/svg" style="display:block;max-width:100%;">']
     parts.append(f'<rect x="2" y="2" width="{size-4}" height="{size-4}" fill="{C["panel"]}" stroke="{C["gold"]}" stroke-width="2"/>')
@@ -1877,6 +1904,8 @@ def build_bcp_activated_svg(birth_bodies, transit_bodies, asc_sign, bcp, argala,
     house_centers = [(x * scale, y * scale) for x, y in HOUSE_CENTERS]
     cell = 92 * scale
 
+    favorability = compute_bcp_favorability(birth_bodies, asc_sign, bcp["activated_house"], mks_houses)
+
     role_by_house = {}
     for h in argala["argala"]:
         role_by_house[h] = "argala"
@@ -1884,15 +1913,18 @@ def build_bcp_activated_svg(birth_bodies, transit_bodies, asc_sign, bcp, argala,
         role_by_house[h] = "virodha"
     if swami_house:
         role_by_house[swami_house] = "swami"
-    role_by_house[bcp["activated_house"]] = "activated"
 
     for h, role in role_by_house.items():
         cx_h, cy_h = house_centers[h - 1]
         fill, stroke, sw = BCP_HOUSE_ROLE_STYLE[role]
         dash = ' stroke-dasharray="5,4"' if role in ("argala", "virodha") else ""
-        opacity = "0.16" if role == "activated" else "0"
         parts.append(f'<rect x="{cx_h-cell/2:.1f}" y="{cy_h-cell/2:.1f}" width="{cell:.1f}" height="{cell:.1f}" '
-                      f'fill="{fill}" fill-opacity="{opacity}" stroke="{stroke}" stroke-width="{sw}"{dash} rx="4"/>')
+                      f'fill="{fill}" fill-opacity="0" stroke="{stroke}" stroke-width="{sw}"{dash} rx="4"/>')
+
+    act_cx, act_cy = house_centers[bcp["activated_house"] - 1]
+    act_fill, act_stroke, act_sw = BCP_GOOD_STYLE if favorability["favorable"] else BCP_CAUTION_STYLE
+    parts.append(f'<rect x="{act_cx-cell/2:.1f}" y="{act_cy-cell/2:.1f}" width="{cell:.1f}" height="{cell:.1f}" '
+                  f'fill="{act_fill}" fill-opacity="0.18" stroke="{act_stroke}" stroke-width="{act_sw}" rx="4"/>')
 
     by_house = {h: {"b": [], "t": []} for h in range(1, 13)}
     for x in birth_bodies:
@@ -1907,7 +1939,7 @@ def build_bcp_activated_svg(birth_bodies, transit_bodies, asc_sign, bcp, argala,
         by_house[h]["t"].append(x)
 
     mks_signs = {info["placed_sign"] for info in mks_houses.values() if info["placed_sign"] is not None}
-    base_font = 12.5
+    base_font = 25
 
     for h in range(1, 13):
         cx_h, cy_h = house_centers[h - 1]
@@ -1915,11 +1947,10 @@ def build_bcp_activated_svg(birth_bodies, transit_bodies, asc_sign, bcp, argala,
         entries = [(x, "b") for x in by_house[h]["b"]] + [(x, "t") for x in by_house[h]["t"]]
         n_planets = len(entries)
         row_h = base_font * 1.55
-        start_y = cy_h - (n_planets * row_h) / 2 - 22
-        badge_y = start_y - 42
+
         badges = []
         if h == bcp["activated_house"]:
-            badges.append(("BCP", "#0d3838", "#fff"))
+            badges.append(("GOOD TIME" if favorability["favorable"] else "BE CAREFUL", act_fill, "#fff"))
         if h == swami_house:
             badges.append(("SWAMI", "#5b3fa0", "#fff"))
         if sign_idx in mks_signs:
@@ -1927,24 +1958,28 @@ def build_bcp_activated_svg(birth_bodies, transit_bodies, asc_sign, bcp, argala,
         dg_planets_here = [x["key"] for x, kind in entries if kind == "b" and graha_dignity(x["key"], x["sign"]) == "Debilitated"]
         if dg_planets_here:
             badges.append((", ".join(dg_planets_here) + " (DG)", "#B5342A", "#fff"))
+
+        badge_stack_h = len(badges) * 30
+        start_y = cy_h - (n_planets * row_h) / 2 - 30 + badge_stack_h / 2
+        badge_y = start_y - 46 - badge_stack_h
+
         for i, (label, bg, fg) in enumerate(badges):
-            bw = len(label) * 5.5 + 14
+            bw = len(label) * 10 + 22
             bx = cx_h - bw / 2
-            by_ = badge_y + i * 17
-            parts.append(f'<rect x="{bx:.1f}" y="{by_:.1f}" width="{bw:.1f}" height="14" rx="4" fill="{bg}"/>')
-            parts.append(f'<text x="{cx_h:.1f}" y="{by_+10:.1f}" text-anchor="middle" font-size="8.5" '
+            by_ = badge_y + i * 30
+            parts.append(f'<rect x="{bx:.1f}" y="{by_:.1f}" width="{bw:.1f}" height="24" rx="6" fill="{bg}"/>')
+            parts.append(f'<text x="{cx_h:.1f}" y="{by_+17:.1f}" text-anchor="middle" font-size="15" '
                           f'font-weight="700" fill="{fg}" font-family="Arial, sans-serif">{label}</text>')
 
-        parts.append(f'<text x="{cx_h:.1f}" y="{start_y - 10:.1f}" text-anchor="middle" font-size="11" font-weight="700" '
+        parts.append(f'<text x="{cx_h:.1f}" y="{start_y - 16:.1f}" text-anchor="middle" font-size="18" font-weight="700" '
                       f'fill="{C["muted"]}" font-family="monospace">H{h} {SIGNS_ASCII[sign_idx][:3]}</text>')
         for i, (x, kind) in enumerate(entries):
             is_transit = kind == "t"
             fill = C["moon"] if x["key"] == "As" else (PLANET_TRANSIT_COLORS.get(x["key"], C["ivory"]) if is_transit else "#1a1a1a")
             retro = " \u211e" if (x.get("retro") and x["key"] not in ("Ra", "Ke")) else ""
-            prefix = "TR " if is_transit else ""
             parts.append(f'<text x="{cx_h:.1f}" y="{start_y + i*row_h:.1f}" text-anchor="middle" '
                           f'font-size="{base_font:.1f}" font-weight="700" fill="{fill}" font-family="Georgia, serif">'
-                          f'{prefix}{x["key"]} {fmt_deg(x["inSign"])}{retro}</text>')
+                          f'{x["key"]} {fmt_deg(x["inSign"])}{retro}</text>')
 
     parts.append("</svg>")
     return "".join(parts)
@@ -2118,9 +2153,12 @@ def render_bcp_research_chakra(birth_chart: dict, birth_bodies: list, transit_bo
             unsafe_allow_html=True,
         )
     st.caption(
-        "\u26a0\ufe0f Solid teal border = activated house \u00b7 dashed red = Argala \u00b7 dashed grey = Virodha \u00b7 "
-        "violet border = Chakra Swami's natal house. The natal chart on the right is completely unaltered "
-        "\u2014 BCP never changes anyone's actual chart, only which house is 'activated' this running year."
+        "\u26a0\ufe0f Activated house: green = broadly favourable, red = \u2018be careful\u2019 (a simplified "
+        "check for Dusthana houses 6/8/12, a debilitated house lord, or a M\u0101raka lord present \u2014 an "
+        "interpretive simplification, not a classical predictive verdict). Dashed red = Argala \u00b7 dashed "
+        "grey = Virodha \u00b7 violet border = Chakra Swami's natal house. The natal chart on the right is "
+        "completely unaltered \u2014 BCP never changes anyone's actual chart, only which house is 'activated' "
+        "this running year."
     )
 
     st.markdown("---")
