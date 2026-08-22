@@ -1889,8 +1889,9 @@ def build_bcp_activated_svg(birth_bodies, transit_bodies, asc_sign, bcp, argala,
     the activated house in green (favourable) or red (use caution) per
     compute_bcp_favorability, Argala houses (red, dashed), Virodha houses
     (grey, dashed), and the Chakra Swami's house (violet), plus BCP/SWAMI/
-    MKS/DG badges — built on the same overlap-free per-house layout already
-    proven in build_advanced_kundali_svg."""
+    MKS/DG badges. Box size is computed per-house from its actual content
+    (planets + badges), and font size adapts down for crowded houses, so
+    nothing is ever drawn outside its own box."""
     size = 900
     parts = [f'<svg viewBox="0 0 {size} {size}" width="{size}" height="{size}" '
              f'xmlns="http://www.w3.org/2000/svg" style="display:block;max-width:100%;">']
@@ -1902,9 +1903,9 @@ def build_bcp_activated_svg(birth_bodies, transit_bodies, asc_sign, bcp, argala,
 
     scale = size / 400
     house_centers = [(x * scale, y * scale) for x, y in HOUSE_CENTERS]
-    cell = 92 * scale
 
     favorability = compute_bcp_favorability(birth_bodies, asc_sign, bcp["activated_house"], mks_houses)
+    act_fill, act_stroke, act_sw = BCP_GOOD_STYLE if favorability["favorable"] else BCP_CAUTION_STYLE
 
     role_by_house = {}
     for h in argala["argala"]:
@@ -1913,18 +1914,6 @@ def build_bcp_activated_svg(birth_bodies, transit_bodies, asc_sign, bcp, argala,
         role_by_house[h] = "virodha"
     if swami_house:
         role_by_house[swami_house] = "swami"
-
-    for h, role in role_by_house.items():
-        cx_h, cy_h = house_centers[h - 1]
-        fill, stroke, sw = BCP_HOUSE_ROLE_STYLE[role]
-        dash = ' stroke-dasharray="5,4"' if role in ("argala", "virodha") else ""
-        parts.append(f'<rect x="{cx_h-cell/2:.1f}" y="{cy_h-cell/2:.1f}" width="{cell:.1f}" height="{cell:.1f}" '
-                      f'fill="{fill}" fill-opacity="0" stroke="{stroke}" stroke-width="{sw}"{dash} rx="4"/>')
-
-    act_cx, act_cy = house_centers[bcp["activated_house"] - 1]
-    act_fill, act_stroke, act_sw = BCP_GOOD_STYLE if favorability["favorable"] else BCP_CAUTION_STYLE
-    parts.append(f'<rect x="{act_cx-cell/2:.1f}" y="{act_cy-cell/2:.1f}" width="{cell:.1f}" height="{cell:.1f}" '
-                  f'fill="{act_fill}" fill-opacity="0.18" stroke="{act_stroke}" stroke-width="{act_sw}" rx="4"/>')
 
     by_house = {h: {"b": [], "t": []} for h in range(1, 13)}
     for x in birth_bodies:
@@ -1939,14 +1928,22 @@ def build_bcp_activated_svg(birth_bodies, transit_bodies, asc_sign, bcp, argala,
         by_house[h]["t"].append(x)
 
     mks_signs = {info["placed_sign"] for info in mks_houses.values() if info["placed_sign"] is not None}
-    base_font = 25
 
+    # Adaptive font size: shrink for houses with many planets so the box
+    # never has to grow past what comfortably fits within the diamond.
+    def _font_for_count(n):
+        if n <= 2:
+            return 25, 39
+        if n <= 4:
+            return 19, 30
+        return 15, 24
+
+    house_layout = {}
     for h in range(1, 13):
-        cx_h, cy_h = house_centers[h - 1]
         sign_idx = (asc_sign + h - 1) % 12
         entries = [(x, "b") for x in by_house[h]["b"]] + [(x, "t") for x in by_house[h]["t"]]
         n_planets = len(entries)
-        row_h = base_font * 1.55
+        base_font, row_h = _font_for_count(n_planets)
 
         badges = []
         if h == bcp["activated_house"]:
@@ -1959,25 +1956,61 @@ def build_bcp_activated_svg(birth_bodies, transit_bodies, asc_sign, bcp, argala,
         if dg_planets_here:
             badges.append((", ".join(dg_planets_here) + " (DG)", "#B5342A", "#fff"))
 
-        badge_stack_h = len(badges) * 30
-        start_y = cy_h - (n_planets * row_h) / 2 - 30 + badge_stack_h / 2
-        badge_y = start_y - 46 - badge_stack_h
+        badge_h = 22
+        badge_stack_h = len(badges) * badge_h
+        planets_h = max(n_planets, 1) * row_h
+        content_h = badge_stack_h + 16 + planets_h + 18
+        max_chars = max([len(f'{x["key"]} {fmt_deg(x["inSign"])}\u211e') for x, k in entries] + [len(b[0]) for b in badges] + [6])
+        content_w = max(150, max_chars * base_font * 0.62 + 20)
 
+        house_layout[h] = {
+            "sign_idx": sign_idx, "entries": entries, "n_planets": n_planets,
+            "base_font": base_font, "row_h": row_h, "badges": badges,
+            "content_h": content_h, "content_w": content_w,
+        }
+
+    for h, role in role_by_house.items():
+        cx_h, cy_h = house_centers[h - 1]
+        fill, stroke, sw = BCP_HOUSE_ROLE_STYLE[role]
+        dash = ' stroke-dasharray="5,4"' if role in ("argala", "virodha") else ""
+        lay = house_layout[h]
+        parts.append(f'<rect x="{cx_h-lay["content_w"]/2:.1f}" y="{cy_h-lay["content_h"]/2:.1f}" '
+                      f'width="{lay["content_w"]:.1f}" height="{lay["content_h"]:.1f}" '
+                      f'fill="{fill}" fill-opacity="0" stroke="{stroke}" stroke-width="{sw}"{dash} rx="4"/>')
+
+    act_h = bcp["activated_house"]
+    act_cx, act_cy = house_centers[act_h - 1]
+    act_lay = house_layout[act_h]
+    parts.append(f'<rect x="{act_cx-act_lay["content_w"]/2:.1f}" y="{act_cy-act_lay["content_h"]/2:.1f}" '
+                  f'width="{act_lay["content_w"]:.1f}" height="{act_lay["content_h"]:.1f}" '
+                  f'fill="{act_fill}" fill-opacity="0.18" stroke="{act_stroke}" stroke-width="{act_sw}" rx="4"/>')
+
+    for h in range(1, 13):
+        cx_h, cy_h = house_centers[h - 1]
+        lay = house_layout[h]
+        sign_idx, entries, n_planets = lay["sign_idx"], lay["entries"], lay["n_planets"]
+        base_font, row_h, badges = lay["base_font"], lay["row_h"], lay["badges"]
+
+        top_y = cy_h - lay["content_h"] / 2
+        badge_y = top_y + 4
         for i, (label, bg, fg) in enumerate(badges):
-            bw = len(label) * 10 + 22
+            bw = len(label) * 9 + 20
             bx = cx_h - bw / 2
-            by_ = badge_y + i * 30
-            parts.append(f'<rect x="{bx:.1f}" y="{by_:.1f}" width="{bw:.1f}" height="24" rx="6" fill="{bg}"/>')
-            parts.append(f'<text x="{cx_h:.1f}" y="{by_+17:.1f}" text-anchor="middle" font-size="15" '
+            by_ = badge_y + i * 22
+            parts.append(f'<rect x="{bx:.1f}" y="{by_:.1f}" width="{bw:.1f}" height="18" rx="5" fill="{bg}"/>')
+            parts.append(f'<text x="{cx_h:.1f}" y="{by_+13:.1f}" text-anchor="middle" font-size="12" '
                           f'font-weight="700" fill="{fg}" font-family="Arial, sans-serif">{label}</text>')
 
-        parts.append(f'<text x="{cx_h:.1f}" y="{start_y - 16:.1f}" text-anchor="middle" font-size="18" font-weight="700" '
-                      f'fill="{C["muted"]}" font-family="monospace">H{h} {SIGNS_ASCII[sign_idx][:3]}</text>')
+        label_y = top_y + len(badges) * 22 + 18
+        parts.append(f'<text x="{cx_h:.1f}" y="{label_y:.1f}" text-anchor="middle" font-size="15" font-weight="700" '
+                      f'fill="{C["muted"]}" font-family="monospace">{sign_idx + 1}</text>')
+
+        planets_start_y = label_y + row_h * 0.7
         for i, (x, kind) in enumerate(entries):
             is_transit = kind == "t"
             fill = C["moon"] if x["key"] == "As" else (PLANET_TRANSIT_COLORS.get(x["key"], C["ivory"]) if is_transit else "#1a1a1a")
             retro = " \u211e" if (x.get("retro") and x["key"] not in ("Ra", "Ke")) else ""
-            parts.append(f'<text x="{cx_h:.1f}" y="{start_y + i*row_h:.1f}" text-anchor="middle" '
+            parts.append(f'<text x="{cx_h:.1f}" y="{planets_start_y + i*row_h:.1f}" text-anchor="middle" '
                           f'font-size="{base_font:.1f}" font-weight="700" fill="{fill}" font-family="Georgia, serif">'
                           f'{x["key"]} {fmt_deg(x["inSign"])}{retro}</text>')
 
