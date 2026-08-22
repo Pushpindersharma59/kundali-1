@@ -1170,8 +1170,8 @@ def _rising_pill(sign_idx, small=False):
     bg, fg = {"Śīrṣodaya": ("#DFF3E8", "#1E7B54"), "Pṛṣṭhodaya": ("#FBE6DE", "#B5502B"),
               "Ubhayodaya": ("#E8E4F7", "#5B45A8")}.get(rising, ("#eee", "#555"))
     label = SIGN_ABBR3[sign_idx] + " \u00b7 " + SIGN_RISING_SHORT.get(rising, "")
-    pad = "6px 18px" if small else "8px 22px"
-    fs = "23px" if small else "25px"
+    pad = "4.5px 13px" if small else "6px 16px"
+    fs = "17px" if small else "19px"
     return (
         f'<span style="display:inline-flex;align-items:center;gap:5px;background:{bg};color:{fg};'
         f'border-radius:8px;padding:{pad};font-weight:700;font-size:{fs};white-space:nowrap;">'
@@ -1217,19 +1217,19 @@ def render_dasha_explorer(birth_chart: dict, birth_bodies: list, birth_dt: datet
         f'padding:20px 22px;display:flex;justify-content:space-between;align-items:flex-start;">'
         f'<div>'
         f'<div style="display:flex;align-items:center;gap:14px;">'
-        f'<div style="width:70px;height:70px;border-radius:50%;background:#fff;border:2px solid {C["gold"]};'
-        f'display:flex;align-items:center;justify-content:center;font-weight:700;font-size:20px;color:{C["gold"]};">'
+        f'<div style="width:53px;height:53px;border-radius:50%;background:#fff;border:2px solid {C["gold"]};'
+        f'display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;color:{C["gold"]};">'
         f'{DASHA_LORD_SHORT[maha["lordIdx"]]}</div>'
-        f'<span style="font-size:56px;font-weight:700;">{maha_name}</span></div>'
+        f'<span style="font-size:42px;font-weight:700;">{maha_name}</span></div>'
         f'<div style="margin-top:10px;">{_rising_pill(maha_sign)}</div>'
-        f'<p class="kmuted" style="margin:10px 0 4px;font-size:24px;">{maha["from"].strftime("%d %b %Y")} \u2014 {maha["to"].strftime("%d %b %Y")}</p>'
-        f'<div style="display:inline-block;background:{C["panel"]};border-radius:8px;padding:6px 16px;font-size:22px;">'
+        f'<p class="kmuted" style="margin:10px 0 4px;font-size:18px;">{maha["from"].strftime("%d %b %Y")} \u2014 {maha["to"].strftime("%d %b %Y")}</p>'
+        f'<div style="display:inline-block;background:{C["panel"]};border-radius:8px;padding:5px 12px;font-size:16.5px;">'
         f'Age {_age_str(birth_dt, maha["from"])} \u2014 Age {_age_str(birth_dt, maha["to"])}</div>'
         f'</div>'
         f'<div style="text-align:right;">'
-        f'<p class="kmuted" style="font-size:20px;font-weight:700;letter-spacing:0.05em;margin:0;">DURATION</p>'
-        f'<p style="font-size:40px;font-weight:700;margin:4px 0;">{maha_dur_yrs} years</p>'
-        f'<p style="color:{C["sindoor"]};font-weight:700;font-size:22px;margin:0;">Active now</p>'
+        f'<p class="kmuted" style="font-size:15px;font-weight:700;letter-spacing:0.05em;margin:0;">DURATION</p>'
+        f'<p style="font-size:30px;font-weight:700;margin:4px 0;">{maha_dur_yrs} years</p>'
+        f'<p style="color:{C["sindoor"]};font-weight:700;font-size:16.5px;margin:0;">Active now</p>'
         f'</div></div>',
         unsafe_allow_html=True,
     )
@@ -1241,9 +1241,9 @@ def render_dasha_explorer(birth_chart: dict, birth_bodies: list, birth_dt: datet
         st.markdown(
             f'<div style="background:{C["panel"]};border:1px solid {C["line"]};border-top:none;padding:16px 18px;height:100%;">'
             f'<div style="display:flex;justify-content:space-between;">'
-            f'<p class="kmuted" style="font-size:22px;font-weight:700;letter-spacing:0.05em;margin:0;">LEVEL 2</p>'
-            f'<p class="kmuted" style="font-size:24px;margin:0;">9 periods</p></div>'
-            f'<p style="font-size:38px;font-weight:700;margin:4px 0 12px;">Antardashas</p>',
+            f'<p class="kmuted" style="font-size:16.5px;font-weight:700;letter-spacing:0.05em;margin:0;">LEVEL 2</p>'
+            f'<p class="kmuted" style="font-size:18px;margin:0;">9 periods</p></div>'
+            f'<p style="font-size:28.5px;font-weight:700;margin:4px 0 12px;">Antardashas</p>',
             unsafe_allow_html=True,
         )
         rows = []
@@ -1252,20 +1252,20 @@ def render_dasha_explorer(birth_chart: dict, birth_bodies: list, birth_dt: datet
             lord_key = DASHA_LORD_SHORT[a["lordIdx"]]
             bg = PLANET_LIGHT_BG.get(lord_key, C["panelSoft"])
             border = f'2px solid {PLANET_LIGHT_BORDER.get(lord_key, C["gold"])}' if is_now else "2px solid transparent"
-            now_badge = (f'<span style="background:{C["gold"]};color:#fff;font-size:20px;font-weight:700;'
-                         f'border-radius:6px;padding:4px 16px;float:right;">NOW</span>') if is_now else ""
+            now_badge = (f'<span style="background:{C["gold"]};color:#fff;font-size:15px;font-weight:700;'
+                         f'border-radius:6px;padding:3px 12px;float:right;">NOW</span>') if is_now else ""
             a_sign = _sign_for(a["lordIdx"])
             rows.append(
                 f'<div style="background:{bg};border:{border};border-radius:10px;padding:16px 14px;margin-bottom:8px;">'
                 f'<div style="display:flex;align-items:center;gap:14px;">'
-                f'<div style="width:44px;height:44px;border-radius:50%;background:#fff;border:1px solid {C["line"]};'
-                f'display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;">'
+                f'<div style="width:33px;height:33px;border-radius:50%;background:#fff;border:1px solid {C["line"]};'
+                f'display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">'
                 f'{lord_key}</div>'
-                f'<span style="font-weight:700;flex-shrink:0;font-size:28px;">{DASHA_LORDS_ASCII[a["lordIdx"]]}</span>'
+                f'<span style="font-weight:700;flex-shrink:0;font-size:21px;">{DASHA_LORDS_ASCII[a["lordIdx"]]}</span>'
                 f'{_rising_pill(a_sign, small=True)}{now_badge}</div>'
-                f'<div style="display:flex;justify-content:space-between;margin-top:10px;padding-left:58px;">'
-                f'<span class="kmuted" style="font-size:24px;">{a["from"].strftime("%d %b %Y")} \u2014 {a["to"].strftime("%d %b %Y")}</span>'
-                f'<span style="text-align:right;font-size:24px;">'
+                f'<div style="display:flex;justify-content:space-between;margin-top:10px;padding-left:47px;">'
+                f'<span class="kmuted" style="font-size:18px;">{a["from"].strftime("%d %b %Y")} \u2014 {a["to"].strftime("%d %b %Y")}</span>'
+                f'<span style="text-align:right;font-size:18px;">'
                 f'<span class="kmuted">Age {_age_str(birth_dt, a["from"])}</span><br>'
                 f'<b>{round(a["yrs"], 2)} years</b></span></div></div>'
             )
@@ -1279,11 +1279,11 @@ def render_dasha_explorer(birth_chart: dict, birth_bodies: list, birth_dt: datet
             f'<div style="background:{C["panel"]};border:1px solid {C["line"]};border-top:none;border-left:none;'
             f'padding:16px 18px;height:100%;">'
             f'<div style="display:flex;justify-content:space-between;">'
-            f'<p class="kmuted" style="font-size:22px;font-weight:700;letter-spacing:0.05em;margin:0;">LEVEL 3</p>'
-            f'<p class="kmuted" style="font-size:24px;margin:0;">{antar["from"].strftime("%d %b %Y")} \u2014 {antar["to"].strftime("%d %b %Y")}</p></div>'
-            f'<p style="font-size:38px;font-weight:700;margin:4px 0 8px;">{DASHA_LORDS_ASCII[antar["lordIdx"]]} Pratyantardashas</p>'
+            f'<p class="kmuted" style="font-size:16.5px;font-weight:700;letter-spacing:0.05em;margin:0;">LEVEL 3</p>'
+            f'<p class="kmuted" style="font-size:18px;margin:0;">{antar["from"].strftime("%d %b %Y")} \u2014 {antar["to"].strftime("%d %b %Y")}</p></div>'
+            f'<p style="font-size:28.5px;font-weight:700;margin:4px 0 8px;">{DASHA_LORDS_ASCII[antar["lordIdx"]]} Pratyantardashas</p>'
             f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">'
-            f'{_rising_pill(maha_sign, small=True)}<span class="kmuted" style="font-size:24px;">\u203a</span>{_rising_pill(antar_sign, small=True)}</div>',
+            f'{_rising_pill(maha_sign, small=True)}<span class="kmuted" style="font-size:18px;">\u203a</span>{_rising_pill(antar_sign, small=True)}</div>',
             unsafe_allow_html=True,
         )
         p_cards = []
@@ -1293,19 +1293,19 @@ def render_dasha_explorer(birth_chart: dict, birth_bodies: list, birth_dt: datet
             bg = PLANET_LIGHT_BG.get(p_lord_key, C["panelSoft"])
             border = f'3px solid {PLANET_LIGHT_BORDER.get(p_lord_key, C["gold"])}' if is_now else "1px solid " + C["line"]
             now_badge = (f'<span style="position:absolute;top:8px;right:8px;background:{C["gold"]};color:#fff;'
-                         f'font-size:18px;font-weight:700;border-radius:6px;padding:3px 12px;">NOW</span>') if is_now else ""
+                         f'font-size:13.5px;font-weight:700;border-radius:6px;padding:2px 9px;">NOW</span>') if is_now else ""
             p_sign = _sign_for(p["lordIdx"])
             p_cards.append(
                 f'<div style="position:relative;background:{bg};border:{border};border-radius:10px;'
                 f'padding:18px;min-width:0;">'
                 f'{now_badge}'
-                f'<div style="width:40px;height:40px;border-radius:50%;background:#fff;border:1px solid {C["line"]};'
-                f'display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;margin-bottom:10px;">'
+                f'<div style="width:30px;height:30px;border-radius:50%;background:#fff;border:1px solid {C["line"]};'
+                f'display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-bottom:10px;">'
                 f'{p_lord_key}</div>'
-                f'<div style="font-weight:700;font-size:28px;margin-bottom:10px;">{DASHA_LORDS_ASCII[p["lordIdx"]]}</div>'
+                f'<div style="font-weight:700;font-size:21px;margin-bottom:10px;">{DASHA_LORDS_ASCII[p["lordIdx"]]}</div>'
                 f'{_rising_pill(p_sign, small=True)}'
-                f'<p class="kmuted" style="font-size:20px;margin:12px 0 6px;">{p["from"].strftime("%d %b %Y")} \u2014 {p["to"].strftime("%d %b %Y")}</p>'
-                f'<p class="kmuted" style="font-size:20px;margin:0;">Age {_age_str(birth_dt, p["from"])}</p>'
+                f'<p class="kmuted" style="font-size:15px;margin:12px 0 6px;">{p["from"].strftime("%d %b %Y")} \u2014 {p["to"].strftime("%d %b %Y")}</p>'
+                f'<p class="kmuted" style="font-size:15px;margin:0;">Age {_age_str(birth_dt, p["from"])}</p>'
                 f'</div>'
             )
         grid_rows = []
@@ -5483,10 +5483,6 @@ if _premium_for_limit:
     render_running_dashas(birth_chart, core_birth_bodies, _birth_dt)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="kcard" style="padding:0;overflow:hidden;">', unsafe_allow_html=True)
-    render_dasha_explorer(birth_chart, core_birth_bodies, _birth_dt)
-    st.markdown("</div>", unsafe_allow_html=True)
-
 
 # ---- Premium: paid Kundali report (PDF, with HTML fallback) ---------------
 user_id = st.session_state["user"]["id"]
@@ -5514,6 +5510,11 @@ if is_premium(user_id):
             file_name=f"kundali_{form['city'][0]}_{form['dob'].isoformat()}.html",
             mime="text/html", use_container_width=True,
         )
+
+    st.markdown('<div style="margin-top:18px;padding:0;overflow:hidden;">', unsafe_allow_html=True)
+    _birth_dt_report = datetime.combine(form["dob"], form["tob"])
+    render_dasha_explorer(birth_chart, core_birth_bodies, _birth_dt_report)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div id="section-transit"></div>', unsafe_allow_html=True)
     st.markdown(f'<div class="kcard" style="border-top:3px solid {C["gold"]};"><h4 style="margin-bottom:14px;">🔄 Nakshatra Live &amp; Current Transits</h4>', unsafe_allow_html=True)
