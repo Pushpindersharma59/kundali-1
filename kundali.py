@@ -1043,9 +1043,118 @@ def compute_pratyantardashas(antar_lord_idx: int, antar_start: datetime, antar_y
         lord_idx = (antar_lord_idx + i) % 9
         yrs = antar_years * DASHA_YEARS[lord_idx] / 120
         end = cursor + timedelta(days=yrs * YEAR_DAYS)
-        subs.append({"lord": DASHA_LORDS[lord_idx], "from": cursor, "to": end, "yrs": yrs})
+        subs.append({"lord": DASHA_LORDS[lord_idx], "lordIdx": lord_idx, "from": cursor, "to": end, "yrs": yrs})
         cursor = end
     return subs
+
+
+# ---- Śīrṣodaya / Pṛṣṭhodaya / Ubhayodaya — classical "rising type" of each
+# rāśi, based on which part of the sign's figure crosses the horizon first.
+# (Gemini, Leo, Virgo, Libra, Scorpio, Aquarius = head-rising; Aries, Taurus,
+# Cancer, Sagittarius, Capricorn = back-rising; Pisces rises both ways.)
+SIGN_RISING_TYPE = {
+    2: "Śīrṣodaya", 4: "Śīrṣodaya", 5: "Śīrṣodaya", 6: "Śīrṣodaya", 7: "Śīrṣodaya", 10: "Śīrṣodaya",
+    0: "Pṛṣṭhodaya", 1: "Pṛṣṭhodaya", 3: "Pṛṣṭhodaya", 8: "Pṛṣṭhodaya", 9: "Pṛṣṭhodaya",
+    11: "Ubhayodaya",
+}
+SIGN_RISING_LABEL = {"Śīrṣodaya": "Head-Rising", "Pṛṣṭhodaya": "Tail/Back-Rising", "Ubhayodaya": "Both"}
+
+
+def compute_running_dashas(birth_chart: dict, birth_bodies: list, at_dt: datetime = None):
+    """Finds which Mahadasha, Antardasha, and Pratyantardasha are active
+    right now (or at at_dt, if given), for the 'Running Now' display."""
+    at_dt = at_dt or datetime.now()
+    maha = next((d for d in birth_chart["dashas"] if d["from"] <= at_dt <= d["to"]), None)
+    if maha is None:
+        maha = birth_chart["dashas"][-1] if at_dt > birth_chart["dashas"][-1]["to"] else birth_chart["dashas"][0]
+
+    antardashas = compute_antardashas(maha["lordIdx"], maha["from"], maha["yrs"])
+    antar = next((a for a in antardashas if a["from"] <= at_dt <= a["to"]), antardashas[0])
+
+    pratyantardashas = compute_pratyantardashas(antar["lordIdx"], antar["from"], antar["yrs"])
+    pratyantar = next((p for p in pratyantardashas if p["from"] <= at_dt <= p["to"]), pratyantardashas[0])
+
+    def _sign_for(lord_idx):
+        key = DASHA_LORD_SHORT[lord_idx]
+        body = next((b for b in birth_bodies if b["key"] == key), None)
+        return body["sign"] if body else None
+
+    return {
+        "maha": maha, "antar": antar, "pratyantar": pratyantar,
+        "maha_sign": _sign_for(maha["lordIdx"]), "antar_sign": _sign_for(antar["lordIdx"]),
+        "pratyantar_sign": _sign_for(pratyantar["lordIdx"]),
+    }
+
+
+def _age_str(birth_dt: datetime, at_dt: datetime) -> str:
+    days = (at_dt - birth_dt).days
+    years = int(days / 365.25)
+    months = int((days - years * 365.25) / 30.44)
+    return f"{years}y {months}m"
+
+
+def render_running_dashas(birth_chart: dict, birth_bodies: list, birth_dt: datetime):
+    """The 'Running Now' card row: Mahadasha / Antardasha / Pratyantardasha
+    currently active, each with its natal sign and classical rising-type."""
+    now = datetime.now()
+    rd = compute_running_dashas(birth_chart, birth_bodies, now)
+
+    maha_name = DASHA_LORDS_ASCII[rd["maha"]["lordIdx"]]
+    antar_name = DASHA_LORDS_ASCII[rd["antar"]["lordIdx"]]
+    pratyantar_name = DASHA_LORDS_ASCII[rd["pratyantar"]["lordIdx"]]
+
+    st.markdown(
+        f'<p class="kmuted" style="font-weight:700;letter-spacing:0.05em;font-size:12px;margin-bottom:2px;">RUNNING NOW</p>'
+        f'<p style="font-size:20px;margin:0 0 12px;">{maha_name} \u2192 {antar_name} \u2192 {pratyantar_name}</p>',
+        unsafe_allow_html=True,
+    )
+
+    def _dasha_card(label, lord_name, sign_idx, entry, is_third_level=False):
+        rising = SIGN_RISING_TYPE.get(sign_idx, "")
+        rising_label = SIGN_RISING_LABEL.get(rising, "")
+        pill_color = {"Śīrṣodaya": ("#DFF3E8", "#1E7B54"), "Pṛṣṭhodaya": ("#FBE6DE", "#B5502B"),
+                      "Ubhayodaya": ("#E8E4F7", "#5B45A8")}.get(rising, ("#eee", "#555"))
+        sign_html = ""
+        if sign_idx is not None:
+            sign_html = (
+                f'<div style="display:inline-flex;align-items:center;gap:8px;background:{pill_color[0]};'
+                f'color:{pill_color[1]};border-radius:10px;padding:6px 12px;margin:8px 0;">'
+                f'<span style="width:9px;height:9px;border-radius:50%;background:{pill_color[1]};display:inline-block;"></span>'
+                f'<span><b style="letter-spacing:0.03em;font-size:12px;">{SIGNS_ASCII[sign_idx].upper()} \u00b7 {rising.upper()}</b><br>'
+                f'<span style="font-size:10.5px;opacity:0.85;">{rising_label.upper()}</span></span></div>'
+            )
+        if is_third_level:
+            detail_html = '<p class="kmuted" style="font-size:13px;margin-top:6px;">third-level timing</p>'
+        else:
+            date_range = f'{entry["from"].strftime("%d %b %Y")} \u2014 {entry["to"].strftime("%d %b %Y")}'
+            age_range = f'{_age_str(birth_dt, entry["from"])} \u2014 {_age_str(birth_dt, entry["to"])}' if label != "MAHADASHA NOW" else f'until Age {_age_str(birth_dt, entry["to"])}'
+            detail_html = (
+                f'<p class="kmuted" style="font-size:13px;margin-top:6px;">{date_range}</p>'
+                f'<div style="display:inline-block;background:{C["panelSoft"]};border-radius:8px;padding:3px 10px;'
+                f'font-size:12px;margin-top:4px;">Age {age_range}</div>'
+            )
+        return (
+            f'<div style="flex:1;padding:16px 18px;{"border-left:1px solid " + C["line"] + ";" if label != "MAHADASHA NOW" else ""}">'
+            f'<p class="kmuted" style="font-size:11px;font-weight:700;letter-spacing:0.05em;margin:0;">{label}</p>'
+            f'<p style="font-size:26px;margin:6px 0 0;">{lord_name}</p>'
+            f'{sign_html}{detail_html}</div>'
+        )
+
+    cards_html = (
+        _dasha_card("MAHADASHA NOW", maha_name, rd["maha_sign"], rd["maha"])
+        + _dasha_card("ANTARDASHA NOW", antar_name, rd["antar_sign"], rd["antar"])
+        + _dasha_card("PRATYANTAR NOW", pratyantar_name, rd["pratyantar_sign"], rd["pratyantar"], is_third_level=True)
+    )
+    st.markdown(
+        f'<div style="display:flex;background:{C["panel"]};border:1px solid {C["line"]};border-radius:14px;overflow:hidden;">'
+        f'{cards_html}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "\u26a0\ufe0f Vim\u015bottar\u012b Da\u015b\u0101 timing, computed from your birth chart. \u015a\u012br\u1e63odaya/"
+        "P\u1e5b\u1e63\u1e6dhodaya is a classical sign-classification used in some interpretive traditions "
+        "\u2014 shown here for the natal sign occupied by each running lord."
+    )
 
 
 def now_in_city(tz: float) -> datetime:
@@ -5199,6 +5308,12 @@ with opt2:
 with opt3:
     st.checkbox("Show Transits", value=_chart_show_transits, key="chart_show_transits")
 st.markdown("</div>", unsafe_allow_html=True)
+
+if _premium_for_limit:
+    st.markdown('<div class="kcard">', unsafe_allow_html=True)
+    _birth_dt = datetime.combine(form["dob"], form["tob"])
+    render_running_dashas(birth_chart, core_birth_bodies, _birth_dt)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ---- Premium: paid Kundali report (PDF, with HTML fallback) ---------------
