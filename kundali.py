@@ -1190,6 +1190,111 @@ PLANET_LIGHT_BORDER = {
 }
 
 
+SPECIAL_LAGNA_KEYS = ["HL", "BL", "GL", "\u015aL", "PP", "ViL"]
+
+
+def compute_mks_markers(birth_bodies: list, asc_sign: int) -> dict:
+    """Maraka Kāraka Sthāna — classically, the lords of the 2nd and 7th
+    houses (the two 'death-inflicting' houses) are the primary Marakas.
+    Returns each Maraka lord's key, house-lordship, and current natal sign."""
+    house2_sign = (asc_sign + 1) % 12
+    house7_sign = (asc_sign + 6) % 12
+    lord2_key = RASHI_LORD.get(house2_sign)
+    lord7_key = RASHI_LORD.get(house7_sign)
+    result = {}
+    for house_num, sign, lord_key in [(2, house2_sign, lord2_key), (7, house7_sign, lord7_key)]:
+        body = next((b for b in birth_bodies if b["key"] == lord_key), None)
+        result[house_num] = {
+            "lord_key": lord_key, "lord_name": BODY_FULLNAME_ASCII.get(lord_key, lord_key),
+            "house_sign": sign, "placed_sign": body["sign"] if body else None,
+        }
+    return result
+
+
+def render_advanced_chart_features(birth_chart: dict, birth_bodies: list, asc_sign: int):
+    """A toggle panel for the deeper Jyotiṣa techniques beyond the core
+    chart — some (Special Lagnas, MKS) are computed and shown here directly;
+    Current Transit, Jaimini Kārakas, and Nava Tāra already exist as their
+    own full sections elsewhere in the app, so their toggle links there
+    instead of duplicating; the remaining techniques (Arūḍha Pādas,
+    Upagrahas, Aṣṭakavarga, Bādhaka/Destiny/Fortuna points, Dagdha rāśi) are
+    real, well-defined classical calculations that deserve careful,
+    individually-verified implementation rather than being rushed — marked
+    'Coming soon' rather than guessed at."""
+    st.markdown(f'<p style="color:{C["gold"]};font-weight:700;margin-bottom:10px;">\u2699\ufe0f Advanced Chart Features</p>', unsafe_allow_html=True)
+
+    ready = {
+        "Special Lagnas": True, "Dagdha & MKS markers": True,
+        "Current Transit": True, "Jaimini Karakas": True, "Nava Tara": True,
+        "Arudha Padas": False, "B\u0101dhaka, Destiny & Fortuna": False,
+        "Upagrahas": False, "Ashtakavarga": False,
+    }
+    left_items = ["Arudha Padas", "B\u0101dhaka, Destiny & Fortuna", "Special Lagnas", "Upagrahas", "Dagdha & MKS markers"]
+    right_items = ["Current Transit", "Jaimini Karakas", "Ashtakavarga", "Nava Tara"]
+
+    tcol1, tcol2 = st.columns(2)
+    toggles = {}
+    with tcol1:
+        for item in left_items:
+            toggles[item] = st.checkbox(item, value=False, disabled=not ready[item], key=f"adv_{item}")
+            if not ready[item]:
+                st.caption("Coming soon")
+    with tcol2:
+        for item in right_items:
+            toggles[item] = st.checkbox(item, value=False, disabled=not ready[item], key=f"adv_{item}")
+            if not ready[item]:
+                st.caption("Coming soon")
+
+    if toggles.get("Special Lagnas"):
+        st.markdown(f'<p style="font-weight:700;margin-top:14px;">Special Lagnas</p>', unsafe_allow_html=True)
+        rows = []
+        for key in SPECIAL_LAGNA_KEYS:
+            body = next((b for b in birth_bodies if b["key"] == key), None)
+            if body:
+                rows.append(
+                    f'<tr><td class="body-key">{key}</td><td>{fmt_deg(body["inSign"])}</td>'
+                    f'<td>{SIGNS[body["sign"]]}</td><td>{NAKSHATRAS[body["nakIdx"]]}</td></tr>'
+                )
+        st.markdown(
+            '<table class="gtable"><tr><th>Lagna</th><th>Degree</th><th>Sign</th><th>Nak\u1e63atra</th></tr>'
+            + "".join(rows) + "</table>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "HL = Hor\u0101 Lagna, BL = Bh\u0101va Lagna, GL = Ghat\u0129k\u0101 Lagna, "
+            "\u015aL = \u015ar\u012b Lagna, PP = Pr\u0101\u1e47apada Lagna, ViL = Vighat\u0129k\u0101 Lagna."
+        )
+
+    if toggles.get("Dagdha & MKS markers"):
+        st.markdown(f'<p style="font-weight:700;margin-top:14px;">MKS \u2014 Maraka K\u0101raka Sth\u0101na</p>', unsafe_allow_html=True)
+        mks = compute_mks_markers(birth_bodies, asc_sign)
+        rows = []
+        for house_num, info in mks.items():
+            placed = SIGNS[info["placed_sign"]] if info["placed_sign"] is not None else "\u2014"
+            rows.append(
+                f'<tr><td>House {house_num} lord</td><td class="body-key">{info["lord_name"]}</td>'
+                f'<td>Rules {SIGNS[info["house_sign"]]}</td><td>Currently in {placed}</td></tr>'
+            )
+        st.markdown(
+            '<table class="gtable"><tr><th>Maraka Sth\u0101na</th><th>Lord</th><th>House Rulership</th><th>Natal Placement</th></tr>'
+            + "".join(rows) + "</table>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "\u26a0\ufe0f The 2nd and 7th house lords are classically the primary M\u0101raka "
+            "(\"death-inflicting\") significators \u2014 an interpretive timing tradition, not a "
+            "literal prediction. Dagdha R\u0101\u015bi (the tithi-based \"burnt sign\") is not yet computed here."
+        )
+
+    if toggles.get("Current Transit"):
+        st.info("See the **\U0001f504 Nakshatra Live & Current Transits** section above for live planetary transits.")
+    if toggles.get("Jaimini Karakas"):
+        st.info("Jaimini Ch\u0101r\u0101 K\u0101rakas (\u0100tmak\u0101raka, Am\u0101tyak\u0101raka, etc.) are shown in the "
+                "**Graha Info** table's Kāraka column, further down this page.")
+    if toggles.get("Nava Tara"):
+        st.info("See the **\U0001f319 Navtara Chakra** section for your personal Nava T\u0101r\u0101 calendar.")
+
+
 def render_dasha_explorer(birth_chart: dict, birth_bodies: list, birth_dt: datetime):
     """A fuller drill-down beneath the compact 'Running Now' row: the active
     Mahadasha as a header bar, every Antardasha within it (Level 2, with the
@@ -5476,6 +5581,12 @@ with opt2:
 with opt3:
     st.checkbox("Show Transits", value=_chart_show_transits, key="chart_show_transits")
 st.markdown("</div>", unsafe_allow_html=True)
+
+if _premium_for_limit:
+    st.markdown('<div class="kcard">', unsafe_allow_html=True)
+    _d1_asc = next(b for b in core_birth_bodies if b["key"] == "As")
+    render_advanced_chart_features(birth_chart, core_birth_bodies, _d1_asc["sign"])
+    st.markdown("</div>", unsafe_allow_html=True)
 
 if _premium_for_limit:
     st.markdown('<div class="kcard">', unsafe_allow_html=True)
