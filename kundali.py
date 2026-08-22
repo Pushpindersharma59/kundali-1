@@ -1852,6 +1852,104 @@ def render_advanced_chart_features(birth_chart: dict, birth_bodies: list, asc_si
         )
 
 
+BCP_HOUSE_ROLE_STYLE = {
+    "activated": ("#0d3838", "#1e5f5f", "3"), "argala": ("#c0392b", "#e74c3c", "1.5"),
+    "virodha": ("#7a7a7a", "#999999", "1.5"), "swami": ("#5b3fa0", "#8e6fd6", "2"),
+}
+
+
+def build_bcp_activated_svg(birth_bodies, transit_bodies, asc_sign, bcp, argala, swami_house, mks_houses):
+    """A diamond chart with BCP roles overlaid as coloured house borders:
+    the activated house (teal, solid), Argala houses (red, dashed), Virodha
+    houses (grey, dashed), and the Chakra Swami's house (violet), plus BCP/
+    SWAMI/MKS/DG badges — built on the same overlap-free per-house layout
+    already proven in build_advanced_kundali_svg."""
+    size = 700
+    parts = [f'<svg viewBox="0 0 {size} {size}" width="{size}" height="{size}" '
+             f'xmlns="http://www.w3.org/2000/svg" style="display:block;max-width:100%;">']
+    parts.append(f'<rect x="2" y="2" width="{size-4}" height="{size-4}" fill="{C["panel"]}" stroke="{C["gold"]}" stroke-width="2"/>')
+    parts.append(f'<line x1="2" y1="2" x2="{size-2}" y2="{size-2}" stroke="{C["gold"]}" stroke-width="1" opacity="0.85"/>')
+    parts.append(f'<line x1="{size-2}" y1="2" x2="2" y2="{size-2}" stroke="{C["gold"]}" stroke-width="1" opacity="0.85"/>')
+    mid = size / 2
+    parts.append(f'<polygon points="{mid},2 {size-2},{mid} {mid},{size-2} 2,{mid}" fill="none" stroke="{C["gold"]}" stroke-width="1" opacity="0.85"/>')
+
+    scale = size / 400
+    house_centers = [(x * scale, y * scale) for x, y in HOUSE_CENTERS]
+    cell = 92 * scale
+
+    role_by_house = {}
+    for h in argala["argala"]:
+        role_by_house[h] = "argala"
+    for h in argala["virodha"]:
+        role_by_house[h] = "virodha"
+    if swami_house:
+        role_by_house[swami_house] = "swami"
+    role_by_house[bcp["activated_house"]] = "activated"
+
+    for h, role in role_by_house.items():
+        cx_h, cy_h = house_centers[h - 1]
+        fill, stroke, sw = BCP_HOUSE_ROLE_STYLE[role]
+        dash = ' stroke-dasharray="5,4"' if role in ("argala", "virodha") else ""
+        opacity = "0.16" if role == "activated" else "0"
+        parts.append(f'<rect x="{cx_h-cell/2:.1f}" y="{cy_h-cell/2:.1f}" width="{cell:.1f}" height="{cell:.1f}" '
+                      f'fill="{fill}" fill-opacity="{opacity}" stroke="{stroke}" stroke-width="{sw}"{dash} rx="4"/>')
+
+    by_house = {h: {"b": [], "t": []} for h in range(1, 13)}
+    for x in birth_bodies:
+        if x["key"] == "As":
+            continue
+        h = ((x["sign"] - asc_sign) % 12) + 1
+        by_house[h]["b"].append(x)
+    for x in transit_bodies:
+        if x["key"] == "As":
+            continue
+        h = ((x["sign"] - asc_sign) % 12) + 1
+        by_house[h]["t"].append(x)
+
+    mks_signs = {info["placed_sign"] for info in mks_houses.values() if info["placed_sign"] is not None}
+    base_font = 12.5
+
+    for h in range(1, 13):
+        cx_h, cy_h = house_centers[h - 1]
+        sign_idx = (asc_sign + h - 1) % 12
+        entries = [(x, "b") for x in by_house[h]["b"]] + [(x, "t") for x in by_house[h]["t"]]
+        n_planets = len(entries)
+        row_h = base_font * 1.55
+        start_y = cy_h - (n_planets * row_h) / 2 - 22
+        badge_y = start_y - 42
+        badges = []
+        if h == bcp["activated_house"]:
+            badges.append(("BCP", "#0d3838", "#fff"))
+        if h == swami_house:
+            badges.append(("SWAMI", "#5b3fa0", "#fff"))
+        if sign_idx in mks_signs:
+            badges.append(("MKS", "#8B2E22", "#fff"))
+        dg_planets_here = [x["key"] for x, kind in entries if kind == "b" and graha_dignity(x["key"], x["sign"]) == "Debilitated"]
+        if dg_planets_here:
+            badges.append((", ".join(dg_planets_here) + " (DG)", "#B5342A", "#fff"))
+        for i, (label, bg, fg) in enumerate(badges):
+            bw = len(label) * 5.5 + 14
+            bx = cx_h - bw / 2
+            by_ = badge_y + i * 17
+            parts.append(f'<rect x="{bx:.1f}" y="{by_:.1f}" width="{bw:.1f}" height="14" rx="4" fill="{bg}"/>')
+            parts.append(f'<text x="{cx_h:.1f}" y="{by_+10:.1f}" text-anchor="middle" font-size="8.5" '
+                          f'font-weight="700" fill="{fg}" font-family="Arial, sans-serif">{label}</text>')
+
+        parts.append(f'<text x="{cx_h:.1f}" y="{start_y - 10:.1f}" text-anchor="middle" font-size="11" font-weight="700" '
+                      f'fill="{C["muted"]}" font-family="monospace">H{h} {SIGNS_ASCII[sign_idx][:3]}</text>')
+        for i, (x, kind) in enumerate(entries):
+            is_transit = kind == "t"
+            fill = C["moon"] if x["key"] == "As" else (PLANET_TRANSIT_COLORS.get(x["key"], C["ivory"]) if is_transit else "#1a1a1a")
+            retro = " \u211e" if (x.get("retro") and x["key"] not in ("Ra", "Ke")) else ""
+            prefix = "TR " if is_transit else ""
+            parts.append(f'<text x="{cx_h:.1f}" y="{start_y + i*row_h:.1f}" text-anchor="middle" '
+                          f'font-size="{base_font:.1f}" font-weight="700" fill="{fill}" font-family="Georgia, serif">'
+                          f'{prefix}{x["key"]} {fmt_deg(x["inSign"])}{retro}</text>')
+
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 def render_bcp_research_chakra(birth_chart: dict, birth_bodies: list, transit_bodies: list, asc_sign: int, birth_dt: datetime):
     """BCP (Bhṛgu Chakra Paddhati) Research Chakra — a running-year system
     where each exact 365-day year from birth activates the next house in a
@@ -1993,6 +2091,39 @@ def render_bcp_research_chakra(birth_chart: dict, birth_bodies: list, transit_bo
                    "Dagdha R\u0101\u015bi is not yet computed in this app.")
 
     st.markdown("---")
+    swami_name = BODY_FULLNAME_ASCII.get(bcp["swami"], bcp["swami"]) if bcp["swami"] else "\u2014"
+    st.markdown(
+        f'<p style="color:{C["gold"]};font-weight:700;font-size:17px;">H{activated_house} activated '
+        f'\u00b7 {BODY_FULLNAME_ASCII.get(lord_key,lord_key)} leads the year</p>',
+        unsafe_allow_html=True,
+    )
+    mks_for_chart = compute_mks_markers(birth_bodies, asc_sign)
+    swami_body = next((b for b in birth_bodies if b["key"] == bcp["swami"]), None) if bcp["swami"] else None
+    swami_house = ((swami_body["sign"] - asc_sign) % 12) + 1 if swami_body else None
+    argala_for_chart = compute_argala(activated_house)
+    bcp_svg = build_bcp_activated_svg(birth_bodies, transit_bodies, asc_sign, bcp, argala_for_chart, swami_house, mks_for_chart)
+    plain_svg = build_svg_chart(birth_bodies, transit_bodies, asc_sign, show_nakshatra=False)
+
+    chcol1, chcol2 = st.columns(2)
+    with chcol1:
+        st.markdown(
+            f'<p class="kmuted" style="font-size:12px;font-weight:700;">BCP ACTIVATION \u00b7 Year {bcp["running_year"]} \u00b7 H{activated_house}</p>'
+            f'<div style="display:flex;justify-content:center;">{bcp_svg}</div>',
+            unsafe_allow_html=True,
+        )
+    with chcol2:
+        st.markdown(
+            f'<p class="kmuted" style="font-size:12px;font-weight:700;">UNALTERED NATAL D1 \u00b7 Reference chart</p>'
+            f'<div style="display:flex;justify-content:center;">{plain_svg}</div>',
+            unsafe_allow_html=True,
+        )
+    st.caption(
+        "\u26a0\ufe0f Solid teal border = activated house \u00b7 dashed red = Argala \u00b7 dashed grey = Virodha \u00b7 "
+        "violet border = Chakra Swami's natal house. The natal chart on the right is completely unaltered "
+        "\u2014 BCP never changes anyone's actual chart, only which house is 'activated' this running year."
+    )
+
+    st.markdown("---")
     st.markdown(f'<p style="color:{C["gold"]};font-weight:700;">Search by running age</p>', unsafe_allow_html=True)
     if "bcp_browse_year" not in st.session_state:
         st.session_state["bcp_browse_year"] = bcp["running_year"]
@@ -2018,6 +2149,39 @@ def render_bcp_research_chakra(birth_chart: dict, birth_bodies: list, transit_bo
                 f'<p class="kmuted" style="font-size:11px;margin:0;">YEAR {y}{" \u00b7 NOW" if is_now else ""}</p>'
                 f'<p style="font-size:16px;font-weight:700;margin:4px 0;">House {y_house}</p>'
                 f'<p class="kmuted" style="font-size:11.5px;">{y_start.strftime("%d %b %Y")}</p></div>',
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("---")
+    st.markdown(f'<p style="color:{C["gold"]};font-weight:700;">Year-wise Progression \u2014 which planet leads each year</p>', unsafe_allow_html=True)
+    st.caption(
+        "Full lifetime table (Years 1-120), grouped into 12-year blocks. \u2018Leads the year\u2019 is that "
+        "year's activated house's natal lord \u2014 not a moving planet, since BCP never alters the natal chart."
+    )
+    for block_start in range(1, 121, 12):
+        block_end = block_start + 11
+        block_idx = (block_start - 1) // 12
+        block_swami = CHAKRA_SWAMI_ORDER[block_idx] if block_idx < 9 else None
+        block_label = f"Years {block_start}-{block_end}" + (f" \u00b7 {BODY_FULLNAME_ASCII.get(block_swami, block_swami)}" if block_swami else " \u00b7 Classical BCP only")
+        is_current_block = block_start <= bcp["running_year"] <= block_end
+        with st.expander(block_label + (" \u00b7 NOW" if is_current_block else ""), expanded=is_current_block):
+            rows = []
+            for y in range(block_start, block_end + 1):
+                y_house = ((y - 1) % 12) + 1
+                y_sign = (asc_sign + y_house - 1) % 12
+                y_lord = RASHI_LORD.get(y_sign)
+                y_start_dt = _safe_replace_year(birth_dt, birth_dt.year + y)
+                is_now_row = y == bcp["running_year"]
+                row_style = f'background:{C["panelSoft"]};' if is_now_row else ""
+                rows.append(
+                    f'<tr style="{row_style}"><td class="body-key">{y}{" \u00b7 NOW" if is_now_row else ""}</td>'
+                    f'<td>H{y_house} ({SIGNS_ASCII[y_sign]})</td>'
+                    f'<td class="body-key">{BODY_FULLNAME_ASCII.get(y_lord, y_lord)}</td>'
+                    f'<td>{y_start_dt.strftime("%d %b %Y")}</td></tr>'
+                )
+            st.markdown(
+                '<table class="gtable"><tr><th>Year</th><th>House</th><th>Leads the Year</th><th>Starts</th></tr>'
+                + "".join(rows) + "</table>",
                 unsafe_allow_html=True,
             )
 
