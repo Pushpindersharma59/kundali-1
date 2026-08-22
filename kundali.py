@@ -1157,6 +1157,162 @@ def render_running_dashas(birth_chart: dict, birth_bodies: list, birth_dt: datet
     )
 
 
+SIGN_ABBR3 = ["Ari", "Tau", "Gem", "Can", "Leo", "Vir", "Lib", "Sco", "Sag", "Cap", "Aqu", "Pis"]
+SIGN_RISING_SHORT = {"Śīrṣodaya": "Head", "Pṛṣṭhodaya": "Tail/Back", "Ubhayodaya": "Both"}
+
+
+def _rising_pill(sign_idx, small=False):
+    """A small colour-coded 'Sign · Rising-type' pill, reused across the
+    Dasha Explorer's Level 1/2/3 rows."""
+    if sign_idx is None:
+        return ""
+    rising = SIGN_RISING_TYPE.get(sign_idx, "")
+    bg, fg = {"Śīrṣodaya": ("#DFF3E8", "#1E7B54"), "Pṛṣṭhodaya": ("#FBE6DE", "#B5502B"),
+              "Ubhayodaya": ("#E8E4F7", "#5B45A8")}.get(rising, ("#eee", "#555"))
+    label = SIGN_ABBR3[sign_idx] + " \u00b7 " + SIGN_RISING_SHORT.get(rising, "")
+    pad = "3px 9px" if small else "4px 11px"
+    fs = "11.5px" if small else "12.5px"
+    return (
+        f'<span style="display:inline-flex;align-items:center;gap:5px;background:{bg};color:{fg};'
+        f'border-radius:8px;padding:{pad};font-weight:700;font-size:{fs};white-space:nowrap;">'
+        f'<span style="width:7px;height:7px;border-radius:50%;background:#fff;border:1.5px solid {fg};display:inline-block;"></span>'
+        f'{label}</span>'
+    )
+
+
+def render_dasha_explorer(birth_chart: dict, birth_bodies: list, birth_dt: datetime):
+    """A fuller drill-down beneath the compact 'Running Now' row: the active
+    Mahadasha as a header bar, every Antardasha within it (Level 2, with the
+    currently-active one highlighted), and every Pratyantardasha within the
+    currently-active Antardasha (Level 3, as a highlighted grid) — all
+    reusing the same Vimśottarī Daśā engine and rising-type classification
+    as 'Running Now' above, just showing the full sibling list at each level
+    instead of only the single active period."""
+    now = datetime.now()
+    rd = compute_running_dashas(birth_chart, birth_bodies, now)
+    maha, antar = rd["maha"], rd["antar"]
+    maha_name = DASHA_LORDS_ASCII[maha["lordIdx"]]
+
+    def _sign_for(lord_idx):
+        key = DASHA_LORD_SHORT[lord_idx]
+        body = next((b for b in birth_bodies if b["key"] == key), None)
+        return body["sign"] if body else None
+
+    maha_sign = _sign_for(maha["lordIdx"])
+    maha_dur_yrs = round(maha["yrs"], 1)
+
+    # ---- Level 1: current Mahadasha header bar ----
+    st.markdown(
+        f'<div style="background:{C["panelSoft"]};border:1px solid {C["line"]};border-radius:14px 14px 0 0;'
+        f'padding:20px 22px;display:flex;justify-content:space-between;align-items:flex-start;">'
+        f'<div>'
+        f'<div style="display:flex;align-items:center;gap:14px;">'
+        f'<div style="width:50px;height:50px;border-radius:50%;background:#fff;border:2px solid {C["gold"]};'
+        f'display:flex;align-items:center;justify-content:center;font-weight:700;color:{C["gold"]};">'
+        f'{DASHA_LORD_SHORT[maha["lordIdx"]]}</div>'
+        f'<span style="font-size:28px;font-weight:700;">{maha_name}</span></div>'
+        f'<div style="margin-top:10px;">{_rising_pill(maha_sign)}</div>'
+        f'<p class="kmuted" style="margin:10px 0 4px;">{maha["from"].strftime("%d %b %Y")} \u2014 {maha["to"].strftime("%d %b %Y")}</p>'
+        f'<div style="display:inline-block;background:{C["panel"]};border-radius:8px;padding:4px 12px;font-size:13px;">'
+        f'Age {_age_str(birth_dt, maha["from"])} \u2014 Age {_age_str(birth_dt, maha["to"])}</div>'
+        f'</div>'
+        f'<div style="text-align:right;">'
+        f'<p class="kmuted" style="font-size:11px;font-weight:700;letter-spacing:0.05em;margin:0;">DURATION</p>'
+        f'<p style="font-size:22px;font-weight:700;margin:4px 0;">{maha_dur_yrs} years</p>'
+        f'<p style="color:{C["sindoor"]};font-weight:700;font-size:13px;margin:0;">Active now</p>'
+        f'</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # ---- Level 2: all 9 Antardashas within the active Mahadasha ----
+    antardashas = compute_antardashas(maha["lordIdx"], maha["from"], maha["yrs"])
+    lcol, rcol = st.columns([1, 1.35])
+    with lcol:
+        st.markdown(
+            f'<div style="background:{C["panel"]};border:1px solid {C["line"]};border-top:none;padding:16px 18px;height:100%;">'
+            f'<div style="display:flex;justify-content:space-between;">'
+            f'<p class="kmuted" style="font-size:11px;font-weight:700;letter-spacing:0.05em;margin:0;">LEVEL 2</p>'
+            f'<p class="kmuted" style="font-size:12px;margin:0;">9 periods</p></div>'
+            f'<p style="font-size:19px;font-weight:700;margin:4px 0 12px;">Antardashas</p>',
+            unsafe_allow_html=True,
+        )
+        rows = []
+        for a in antardashas:
+            is_now = a["from"] <= now <= a["to"]
+            bg = C["panelSoft"] if is_now else "transparent"
+            now_badge = (f'<span style="background:{C["gold"]};color:#fff;font-size:10px;font-weight:700;'
+                         f'border-radius:6px;padding:2px 8px;float:right;">NOW</span>') if is_now else ""
+            a_sign = _sign_for(a["lordIdx"])
+            rows.append(
+                f'<div style="background:{bg};border-radius:8px;padding:10px 8px;margin-bottom:2px;">'
+                f'<div style="display:flex;align-items:center;gap:10px;">'
+                f'<div style="width:26px;height:26px;border-radius:50%;background:#fff;border:1px solid {C["line"]};'
+                f'display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;">'
+                f'{DASHA_LORD_SHORT[a["lordIdx"]]}</div>'
+                f'<span style="font-weight:700;flex-shrink:0;">{DASHA_LORDS_ASCII[a["lordIdx"]]}</span>'
+                f'{_rising_pill(a_sign, small=True)}{now_badge}</div>'
+                f'<div style="display:flex;justify-content:space-between;margin-top:6px;padding-left:36px;">'
+                f'<span class="kmuted" style="font-size:12px;">{a["from"].strftime("%d %b %Y")} \u2014 {a["to"].strftime("%d %b %Y")}</span>'
+                f'<span style="text-align:right;font-size:12px;">'
+                f'<span class="kmuted">Age {_age_str(birth_dt, a["from"])}</span><br>'
+                f'<b>{round(a["yrs"], 2)} years</b></span></div></div>'
+                f'<hr style="border:none;border-top:1px solid {C["line"]};margin:6px 0;"/>'
+            )
+        st.markdown("".join(rows) + "</div>", unsafe_allow_html=True)
+
+    # ---- Level 3: all 9 Pratyantardashas within the active Antardasha ----
+    pratyantardashas = compute_pratyantardashas(antar["lordIdx"], antar["from"], antar["yrs"])
+    antar_sign = _sign_for(antar["lordIdx"])
+    with rcol:
+        st.markdown(
+            f'<div style="background:{C["panel"]};border:1px solid {C["line"]};border-top:none;border-left:none;'
+            f'padding:16px 18px;height:100%;">'
+            f'<div style="display:flex;justify-content:space-between;">'
+            f'<p class="kmuted" style="font-size:11px;font-weight:700;letter-spacing:0.05em;margin:0;">LEVEL 3</p>'
+            f'<p class="kmuted" style="font-size:12px;margin:0;">{antar["from"].strftime("%d %b %Y")} \u2014 {antar["to"].strftime("%d %b %Y")}</p></div>'
+            f'<p style="font-size:19px;font-weight:700;margin:4px 0 8px;">{DASHA_LORDS_ASCII[antar["lordIdx"]]} Pratyantardashas</p>'
+            f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">'
+            f'{_rising_pill(maha_sign, small=True)}<span class="kmuted">\u203a</span>{_rising_pill(antar_sign, small=True)}</div>',
+            unsafe_allow_html=True,
+        )
+        p_cards = []
+        for p in pratyantardashas:
+            is_now = p["from"] <= now <= p["to"]
+            bg = "#FFF3B0" if is_now else C["panelSoft"]
+            border = f'2px solid {C["gold"]}' if is_now else f'1px solid {C["line"]}'
+            now_badge = (f'<span style="position:absolute;top:8px;right:8px;background:{C["gold"]};color:#fff;'
+                         f'font-size:9.5px;font-weight:700;border-radius:6px;padding:2px 7px;">NOW</span>') if is_now else ""
+            p_sign = _sign_for(p["lordIdx"])
+            p_cards.append(
+                f'<div style="position:relative;background:{bg};border:{border};border-radius:10px;'
+                f'padding:12px;min-width:0;">'
+                f'{now_badge}'
+                f'<div style="width:24px;height:24px;border-radius:50%;background:#fff;border:1px solid {C["line"]};'
+                f'display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;margin-bottom:6px;">'
+                f'{DASHA_LORD_SHORT[p["lordIdx"]]}</div>'
+                f'<div style="font-weight:700;font-size:14px;margin-bottom:6px;">{DASHA_LORDS_ASCII[p["lordIdx"]]}</div>'
+                f'{_rising_pill(p_sign, small=True)}'
+                f'<p class="kmuted" style="font-size:11px;margin:8px 0 4px;">{p["from"].strftime("%d %b %Y")} \u2014 {p["to"].strftime("%d %b %Y")}</p>'
+                f'<p class="kmuted" style="font-size:11px;margin:0;">Age {_age_str(birth_dt, p["from"])}</p>'
+                f'</div>'
+            )
+        grid_rows = []
+        for i in range(0, 9, 3):
+            row_cells = "".join(f'<td style="width:33.33%;padding:5px;vertical-align:top;">{c}</td>' for c in p_cards[i:i + 3])
+            grid_rows.append(f'<tr>{row_cells}</tr>')
+        st.markdown(
+            f'<table style="width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;">'
+            f'{"".join(grid_rows)}</table></div>',
+            unsafe_allow_html=True,
+        )
+
+    st.caption(
+        "\u26a0\ufe0f Full Vim\u015bottar\u012b Da\u015b\u0101 breakdown \u2014 Level 2 shows every Antardash\u0101 within "
+        "the currently active Mah\u0101da\u015b\u0101, Level 3 shows every Pratyantardash\u0101 within the currently "
+        "active Antardash\u0101. The highlighted period in each level is the one running right now."
+    )
+
+
 def now_in_city(tz: float) -> datetime:
     return datetime.utcnow() + timedelta(hours=tz)
 
@@ -5313,6 +5469,10 @@ if _premium_for_limit:
     st.markdown('<div class="kcard">', unsafe_allow_html=True)
     _birth_dt = datetime.combine(form["dob"], form["tob"])
     render_running_dashas(birth_chart, core_birth_bodies, _birth_dt)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="kcard" style="padding:0;overflow:hidden;">', unsafe_allow_html=True)
+    render_dasha_explorer(birth_chart, core_birth_bodies, _birth_dt)
     st.markdown("</div>", unsafe_allow_html=True)
 
 
