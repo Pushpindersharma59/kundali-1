@@ -1348,7 +1348,169 @@ def compute_partial_sarvashtakavarga(birth_bodies: list) -> list:
     return totals
 
 
-def render_advanced_chart_features(birth_chart: dict, birth_bodies: list, asc_sign: int, form: dict):
+def compute_drishti(birth_bodies: list, asc_sign: int) -> list:
+    """Classical graha dṛṣṭi (planetary aspect): every planet fully aspects
+    the 7th house from itself; Mars additionally aspects the 4th and 8th,
+    Jupiter the 5th and 9th, Saturn the 3rd and 10th (all from its own
+    position). Returns a list of {from_key, from_house, to_house}."""
+    SPECIAL_ASPECTS = {"Ma": [4, 8], "Jp": [5, 9], "Sa": [3, 10]}
+    aspects = []
+    for b in birth_bodies:
+        if b["key"] == "As":
+            continue
+        from_house = ((b["sign"] - asc_sign) % 12) + 1
+        for offset in [7] + SPECIAL_ASPECTS.get(b["key"], []):
+            to_house = ((from_house - 1 + offset - 1) % 12) + 1
+            aspects.append({"from_key": b["key"], "from_house": from_house, "to_house": to_house})
+    return aspects
+
+
+def compute_advanced_house_tags(birth_bodies: list, transit_bodies: list, asc_sign: int, toggles: dict) -> dict:
+    """Gathers every small toggle-controlled label (Arūḍha Pādas, Special
+    Lagnas, Upagrahas, Jaimini Kārakas, MKS, debilitation, partial SAV) into
+    a per-house list of (text, kind) tags, for the Advanced Kundali Chart to
+    render. Kept as a separate collector so the chart-drawing function
+    itself doesn't need to know these systems' internals."""
+    tags = {h: [] for h in range(1, 13)}
+
+    def house_of_sign(sign_idx):
+        return ((sign_idx - asc_sign) % 12) + 1
+
+    if toggles.get("Arudha Padas"):
+        for house_num, info in compute_arudha_padas(birth_bodies, asc_sign).items():
+            label = "AL" if house_num == 1 else f"A{house_num}"
+            tags[house_of_sign(info["arudha_sign"])].append((label, "arudha"))
+
+    if toggles.get("Special Lagnas"):
+        for key in SPECIAL_LAGNA_KEYS:
+            body = next((b for b in birth_bodies if b["key"] == key), None)
+            if body:
+                tags[house_of_sign(body["sign"])].append((key, "lagna"))
+
+    if toggles.get("Upagrahas"):
+        sun_b = next((b for b in birth_bodies if b["key"] == "Su"), None)
+        if sun_b:
+            sun_sid = sun_b["sign"] * 30 + sun_b["inSign"]
+            upagraha_abbr = {"Dhuma": "Dh", "Vyatipata": "Vy", "Parivesha": "Pv", "Indrachapa": "Ic", "Upaketu": "Uk"}
+            for name, deg in compute_upagrahas(sun_sid).items():
+                tags[house_of_sign(int(deg // 30))].append((upagraha_abbr[name], "upagraha"))
+
+    if toggles.get("Jaimini Karakas"):
+        for b in birth_bodies:
+            if b.get("karaka"):
+                tags[house_of_sign(b["sign"])].append((b["karaka"], "karaka"))
+
+    if toggles.get("Dagdha & MKS markers"):
+        mks = compute_mks_markers(birth_bodies, asc_sign)
+        for house_num, info in mks.items():
+            if info["placed_sign"] is not None:
+                tags[house_of_sign(info["placed_sign"])].append(("MKS", "mks"))
+        for b in birth_bodies:
+            if b["key"] in ("As",):
+                continue
+            if graha_dignity(b["key"], b["sign"]) == "Debilitated":
+                tags[house_of_sign(b["sign"])].append((f'{b["key"]} (DG)', "dg"))
+
+    if toggles.get("Ashtakavarga"):
+        partial_sav = compute_partial_sarvashtakavarga(birth_bodies)
+        for sign_idx in range(12):
+            tags[house_of_sign(sign_idx)].append((f"SAV {partial_sav[sign_idx]}", "sav"))
+
+    return tags
+
+
+ADVANCED_TAG_COLORS = {
+    "arudha": ("#EDE0F7", "#6A3EA1"), "lagna": ("#D7F0EA", "#1E7B54"),
+    "upagraha": ("#FFF0D6", "#B5751C"), "karaka": ("#E9DFF9", "#5B3FA0"),
+    "mks": ("#F4C7C3", "#8B2E22"), "dg": ("#FBD8D8", "#B5342A"), "sav": ("#DCE7F5", "#2E5C99"),
+}
+
+
+def build_advanced_kundali_svg(birth_bodies, transit_bodies, asc_sign, tags_by_house, drishti,
+                                show_transits=True, font_scale=1.0):
+    """The Advanced Kundali Chart — a bigger, separate diamond chart (does
+    not touch or replace build_svg_chart) that overlays every toggle-active
+    system's labels underneath each house's core planet list, plus an
+    optional dṛṣṭi (aspect) line layer."""
+    size = 760
+    cx = cy = size / 2
+    parts = [f'<svg viewBox="0 0 {size} {size}" width="{size}" height="{size}" '
+             f'xmlns="http://www.w3.org/2000/svg" style="display:block;max-width:100%;">']
+    parts.append(f'<rect x="2" y="2" width="{size-4}" height="{size-4}" fill="{C["panel"]}" stroke="{C["gold"]}" stroke-width="2"/>')
+    parts.append(f'<line x1="2" y1="2" x2="{size-2}" y2="{size-2}" stroke="{C["gold"]}" stroke-width="1" opacity="0.85"/>')
+    parts.append(f'<line x1="{size-2}" y1="2" x2="2" y2="{size-2}" stroke="{C["gold"]}" stroke-width="1" opacity="0.85"/>')
+    mid = size / 2
+    parts.append(f'<polygon points="{mid},2 {size-2},{mid} {mid},{size-2} 2,{mid}" fill="none" stroke="{C["gold"]}" stroke-width="1" opacity="0.85"/>')
+
+    scale = size / 400
+    house_centers = [(x * scale, y * scale) for x, y in HOUSE_CENTERS]
+
+    if drishti:
+        for a in drishti:
+            fx, fy = house_centers[a["from_house"] - 1]
+            tx, ty = house_centers[a["to_house"] - 1]
+            color = PLANET_TRANSIT_COLORS.get(a["from_key"], C["muted"])
+            parts.append(f'<line x1="{fx:.1f}" y1="{fy:.1f}" x2="{tx:.1f}" y2="{ty:.1f}" '
+                         f'stroke="{color}" stroke-width="1" opacity="0.28" stroke-dasharray="2,3"/>')
+
+    by_house = {h: {"b": [], "t": []} for h in range(1, 13)}
+    for x in birth_bodies:
+        if x["key"] == "As":
+            continue
+        h = ((x["sign"] - asc_sign) % 12) + 1
+        by_house[h]["b"].append(x)
+    if show_transits:
+        for x in transit_bodies:
+            if x["key"] == "As":
+                continue
+            h = ((x["sign"] - asc_sign) % 12) + 1
+            by_house[h]["t"].append(x)
+
+    base_font = 12 * font_scale
+    tag_font = 9 * font_scale
+
+    for h in range(1, 13):
+        cx_h, cy_h = house_centers[h - 1]
+        sign_idx = (asc_sign + h - 1) % 12
+        entries = [(x, "b") for x in by_house[h]["b"]] + [(x, "t") for x in by_house[h]["t"]]
+        n_planets = len(entries)
+        row_h = base_font * 1.55
+        label_clearance = 22 * font_scale
+        start_y = cy_h - (n_planets * row_h) / 2 - label_clearance
+        parts.append(f'<text x="{cx_h:.1f}" y="{start_y - 10*font_scale:.1f}" text-anchor="middle" font-size="{9*font_scale:.1f}" '
+                      f'fill="{C["muted"]}" font-family="monospace">H{h} {SIGNS_ASCII[sign_idx][:3]}</text>')
+        for i, (x, kind) in enumerate(entries):
+            fill = C["sindoor"] if kind == "t" else (C["moon"] if x["key"] == "As" else C["ivory"])
+            retro = " \u211e" if (x.get("retro") and x["key"] not in ("Ra", "Ke")) else ""
+            prefix = "TR " if kind == "t" else ""
+            parts.append(f'<text x="{cx_h:.1f}" y="{start_y + i*row_h:.1f}" text-anchor="middle" '
+                          f'font-size="{base_font:.1f}" font-weight="700" fill="{fill}" font-family="Georgia, serif">'
+                          f'{prefix}{x["key"]} {fmt_deg(x["inSign"])}{retro}</text>')
+
+        tags = tags_by_house.get(h, [])
+        if tags:
+            tag_y = start_y + n_planets * row_h + 10 * font_scale
+            row_x = cx_h
+            col_w = 40 * font_scale
+            per_row = 3
+            for i, (text, kind) in enumerate(tags):
+                row = i // per_row
+                col = i % per_row
+                n_in_row = min(per_row, len(tags) - row * per_row)
+                tx = cx_h + (col - (n_in_row - 1) / 2) * col_w
+                ty = tag_y + row * (16 * font_scale)
+                bg, fg = ADVANCED_TAG_COLORS.get(kind, ("#eee", "#555"))
+                tw = max(len(text) * 5.2 * font_scale + 8, 26)
+                parts.append(f'<rect x="{tx - tw/2:.1f}" y="{ty - 8*font_scale:.1f}" width="{tw:.1f}" height="{15*font_scale:.1f}" '
+                              f'rx="4" fill="{bg}" stroke="{fg}" stroke-width="0.6" opacity="0.92"/>')
+                parts.append(f'<text x="{tx:.1f}" y="{ty + 3*font_scale:.1f}" text-anchor="middle" '
+                              f'font-size="{tag_font:.1f}" font-weight="700" fill="{fg}" font-family="Arial, sans-serif">{text}</text>')
+
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def render_advanced_chart_features(birth_chart: dict, birth_bodies: list, asc_sign: int, form: dict, transit_bodies: list):
     """A toggle panel for the deeper Jyotiṣa techniques beyond the core
     chart. Special Lagnas, MKS, Arūḍha Pādas, Bādhaka/Fortuna, and Upagrahas
     are computed and shown here directly; Current Transit, Jaimini Kārakas,
@@ -1534,6 +1696,48 @@ def render_advanced_chart_features(birth_chart: dict, birth_bodies: list, asc_si
                 "**Graha Info** table's Kāraka column, further down this page.")
     if toggles.get("Nava Tara"):
         st.info("See the **\U0001f319 Navtara Chakra** section for your personal Nava T\u0101r\u0101 calendar.")
+
+    if any(toggles.get(k) for k in ["Arudha Padas", "Special Lagnas", "Upagrahas", "Jaimini Karakas",
+                                      "Dagdha & MKS markers", "Ashtakavarga"]):
+        st.markdown("---")
+        st.markdown(f'<p style="color:{C["gold"]};font-weight:700;font-size:18px;margin:6px 0 10px;">'
+                    f'\U0001f5fa\ufe0f Advanced Kundali Chart</p>', unsafe_allow_html=True)
+        st.caption(
+            "A separate, additional chart \u2014 shows every toggle-enabled system above directly on the "
+            "diamond chart, instead of as tables. Your main Kundali chart further up the page is untouched."
+        )
+        acol1, acol2, acol3 = st.columns([1, 1, 1])
+        with acol1:
+            show_drishti = st.checkbox("Show Dṛṣṭi (aspect lines)", value=False, key="adv_show_drishti")
+        with acol2:
+            show_adv_transits = st.checkbox("Show Transits on this chart", value=True, key="adv_show_transits")
+        with acol3:
+            font_scale = st.slider("Font size", min_value=0.6, max_value=1.6, value=1.0, step=0.1, key="adv_font_scale")
+
+        tags_by_house = compute_advanced_house_tags(birth_bodies, transit_bodies, asc_sign, toggles)
+        drishti = compute_drishti(birth_bodies, asc_sign) if show_drishti else []
+        adv_svg = build_advanced_kundali_svg(
+            birth_bodies, transit_bodies, asc_sign, tags_by_house, drishti,
+            show_transits=show_adv_transits, font_scale=font_scale,
+        )
+        st.markdown(f'<div style="display:flex;justify-content:center;">{adv_svg}</div>', unsafe_allow_html=True)
+
+        legend_html = "".join(
+            f'<span style="background:{bg};color:{fg};border:1px solid {fg}55;border-radius:6px;'
+            f'padding:2px 10px;font-size:12px;font-weight:700;margin-right:6px;">{label}</span>'
+            for label, (bg, fg) in [
+                ("Arūḍha Pada", ADVANCED_TAG_COLORS["arudha"]), ("Special Lagna", ADVANCED_TAG_COLORS["lagna"]),
+                ("Upagraha", ADVANCED_TAG_COLORS["upagraha"]), ("Jaimini Kāraka", ADVANCED_TAG_COLORS["karaka"]),
+                ("MKS", ADVANCED_TAG_COLORS["mks"]), ("Debilitated", ADVANCED_TAG_COLORS["dg"]),
+                ("Partial SAV", ADVANCED_TAG_COLORS["sav"]),
+            ]
+        )
+        st.markdown(f'<div style="margin-top:10px;">{legend_html}</div>', unsafe_allow_html=True)
+        st.caption(
+            "\u26a0\ufe0f \u1e0cr\u1e63\u1e6di (aspect) lines show the classical 7th-house aspect from every "
+            "planet, plus Mars' extra 4th/8th, Jupiter's 5th/9th, and Saturn's 3rd/10th \u2014 a traditional "
+            "interpretive layer, not a literal prediction."
+        )
 
 
 def render_dasha_explorer(birth_chart: dict, birth_bodies: list, birth_dt: datetime):
@@ -5826,7 +6030,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 if _premium_for_limit:
     st.markdown('<div class="kcard">', unsafe_allow_html=True)
     _d1_asc = next(b for b in core_birth_bodies if b["key"] == "As")
-    render_advanced_chart_features(birth_chart, core_birth_bodies, _d1_asc["sign"], form)
+    render_advanced_chart_features(birth_chart, core_birth_bodies, _d1_asc["sign"], form, core_transit_bodies)
     st.markdown("</div>", unsafe_allow_html=True)
 
 if _premium_for_limit:
