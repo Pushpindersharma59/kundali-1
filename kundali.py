@@ -6027,6 +6027,12 @@ def render_todays_snapshot(lat: float, lon: float, tz: float, city_name: str):
 DASHBOARD_HUB_CARDS = [
     ("\U0001f504", "Nakshatra Live & Transits", "See today's tithi, nakshatra, and live planetary positions.",
      "#section-transit", "#E3F2FD", "#1565C0"),
+    ("\u2696\ufe0f", "Running Now", "Your currently active Mahadasha, Antardasha, and Pratyantardasha.",
+     "#section-dasha", "#EDE7F6", "#4527A0"),
+    ("\U0001f5fa\ufe0f", "Advanced Kundali Chart", "Arūḍha Pādas, Ṣaḍbala-adjacent markers, Dṛṣṭi, and more, on one chart.",
+     "#section-advanced", "#E8EAF6", "#283593"),
+    ("\U0001f9ee", "BCP Research Chakra", "Your running year, activated house, and cycle-ruler research.",
+     "#section-bcp", "#E0F2F1", "#00695C"),
     ("\U0001f4ff", "Day-wise Remedies", "Gemstones, colours, and practices for each weekday.",
      "#section-remedies", "#E8F5E9", "#2E7D32"),
     ("\U0001f319", "Navtara Chakra", "Your auspicious-day calendar, based on your own nakshatra.",
@@ -6040,6 +6046,48 @@ DASHBOARD_HUB_CARDS = [
     ("\U0001f522", "Numerology", "Life Path, Destiny, Soul Urge, and more — Pythagorean and Chaldean.",
      "#section-numerology", "#E0F7FA", "#00695C"),
 ]
+
+
+def render_chart_summary_dashboard(birth_chart: dict, birth_bodies: list, transit_bodies: list, form: dict, running_dashas: dict):
+    """The attractive at-a-glance dashboard header: identity, Ascendant,
+    Rāśi, Nakṣatra, current Mahādaśā, and today's Sun/Moon transit sign —
+    all in one colourful stat-card row, sitting above the section
+    navigation cards."""
+    asc = next(b for b in birth_bodies if b["key"] == "As")
+    moon = next(b for b in birth_bodies if b["key"] == "Mo")
+    t_sun = next(b for b in transit_bodies if b["key"] == "Su")
+    t_moon = next(b for b in transit_bodies if b["key"] == "Mo")
+    maha_name = DASHA_LORDS_ASCII[running_dashas["maha"]["lordIdx"]]
+    antar_name = DASHA_LORDS_ASCII[running_dashas["antar"]["lordIdx"]]
+
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#2b1f4a,#1a1235);border-radius:18px;'
+        f'padding:22px 26px;margin-bottom:6px;">'
+        f'<p style="color:#d8c9ff;font-size:13px;letter-spacing:0.06em;margin:0 0 4px;">DASHBOARD</p>'
+        f'<p style="color:#fff;font-size:26px;font-weight:700;margin:0 0 16px;">'
+        f'{form.get("name") or "Your"} Kundali Overview</p>',
+        unsafe_allow_html=True,
+    )
+
+    stats = [
+        ("\u2191", "ASCENDANT", SIGNS_ASCII[asc["sign"]], "#FFD79A"),
+        ("\U0001f319", "R\u0100\u015aI (MOON SIGN)", SIGNS_ASCII[moon["sign"]], "#B8E0FF"),
+        ("\u2728", "NAK\u1e62ATRA", NAKSHATRAS_ASCII[moon["nakIdx"]], "#E4C6FF"),
+        ("\u2696\ufe0f", "RUNNING DA\u015aĀ", f"{maha_name} / {antar_name}", "#C6FFDA"),
+        ("\u2600\ufe0f", "TRANSIT SUN", SIGNS_ASCII[t_sun["sign"]], "#FFE0A8"),
+        ("\U0001f31d", "TRANSIT MOON", SIGNS_ASCII[t_moon["sign"]], "#C9E4FF"),
+    ]
+    cells = "".join(
+        f'<td style="width:16.6%;padding:6px;text-align:center;">'
+        f'<div style="font-size:20px;">{icon}</div>'
+        f'<div style="color:#a99fc9;font-size:10px;letter-spacing:0.05em;margin:4px 0 2px;">{label}</div>'
+        f'<div style="color:{color};font-size:15px;font-weight:700;">{value}</div></td>'
+        for icon, label, value, color in stats
+    )
+    st.markdown(
+        f'<table style="width:100%;border-collapse:collapse;"><tr>{cells}</tr></table></div>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_dashboard_hub():
@@ -6439,6 +6487,11 @@ tdict = {t["key"]: t for t in transit_chart["bodies"]}
 core_birth_bodies = [b for b in birth_chart["bodies"] if b["key"] in CORE_KEYS]
 core_transit_bodies = [b for b in transit_chart["bodies"] if b["key"] in CORE_KEYS]
 
+if _premium_for_limit:
+    _dash_running = compute_running_dashas(birth_chart, core_birth_bodies)
+    render_chart_summary_dashboard(birth_chart, core_birth_bodies, core_transit_bodies, form, _dash_running)
+    render_dashboard_hub()
+
 # ---- Chart display toggles: read the current (prior-run) values now so
 # they affect this run's chart rendering; the actual widgets are drawn below
 # the charts, per the requested "options at the bottom" placement. Streamlit
@@ -6545,18 +6598,21 @@ with opt3:
 st.markdown("</div>", unsafe_allow_html=True)
 
 if _premium_for_limit:
+    st.markdown('<div id="section-advanced"></div>', unsafe_allow_html=True)
     st.markdown('<div class="kcard">', unsafe_allow_html=True)
     _d1_asc = next(b for b in core_birth_bodies if b["key"] == "As")
     render_advanced_chart_features(birth_chart, core_birth_bodies, _d1_asc["sign"], form, core_transit_bodies)
     st.markdown("</div>", unsafe_allow_html=True)
 
 if _premium_for_limit:
+    st.markdown('<div id="section-bcp"></div>', unsafe_allow_html=True)
     st.markdown('<div class="kcard">', unsafe_allow_html=True)
     _bcp_birth_dt = datetime.combine(form["dob"], form["tob"])
     render_bcp_research_chakra(birth_chart, core_birth_bodies, core_transit_bodies, _d1_asc["sign"], _bcp_birth_dt)
     st.markdown("</div>", unsafe_allow_html=True)
 
 if _premium_for_limit:
+    st.markdown('<div id="section-dasha"></div>', unsafe_allow_html=True)
     st.markdown('<div class="kcard">', unsafe_allow_html=True)
     _birth_dt = datetime.combine(form["dob"], form["tob"])
     render_running_dashas(birth_chart, core_birth_bodies, _birth_dt)
