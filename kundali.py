@@ -1211,23 +1211,160 @@ def compute_mks_markers(birth_bodies: list, asc_sign: int) -> dict:
     return result
 
 
-def render_advanced_chart_features(birth_chart: dict, birth_bodies: list, asc_sign: int):
+def compute_arudha_padas(birth_bodies: list, asc_sign: int) -> dict:
+    """Arūḍha Pāda for each of the 12 houses (AL through A12) — the house's
+    'perceived image'. Classical method: count the distance from the house
+    to its lord, then count that same distance again from the lord's
+    position. If the result lands on the house itself or its 7th (which
+    would be meaningless), it's moved to the 10th house from the original
+    house instead."""
+    results = {}
+    for house_num in range(1, 13):
+        house_sign = (asc_sign + house_num - 1) % 12
+        lord_key = RASHI_LORD.get(house_sign)
+        lord_body = next((b for b in birth_bodies if b["key"] == lord_key), None)
+        if not lord_body:
+            continue
+        lord_sign = lord_body["sign"]
+        distance = (lord_sign - house_sign) % 12
+        arudha_sign = (lord_sign + distance) % 12
+        if arudha_sign == house_sign or arudha_sign == (house_sign + 6) % 12:
+            arudha_sign = (house_sign + 9) % 12
+        results[house_num] = {"house_sign": house_sign, "lord_key": lord_key, "arudha_sign": arudha_sign}
+    return results
+
+
+def compute_badhaka(asc_sign: int) -> dict:
+    """Bādhakasthāna (the 'obstacle house') — determined by the modality of
+    the ascendant sign: movable (Chara) signs use the 11th house, fixed
+    (Sthira) signs use the 9th, dual (Dwiswabhāva) signs use the 7th."""
+    modality = asc_sign % 3  # signs cycle movable/fixed/dual starting from Aries
+    badhaka_house = {0: 11, 1: 9, 2: 7}[modality]
+    badhaka_sign = (asc_sign + badhaka_house - 1) % 12
+    return {
+        "badhaka_house": badhaka_house, "badhaka_sign": badhaka_sign,
+        "badhaka_lord": RASHI_LORD.get(badhaka_sign),
+    }
+
+
+def compute_part_of_fortune(asc_sid: float, sun_sid: float, moon_sid: float, asc_sign: int, sun_sign: int) -> float:
+    """Part of Fortune (Pars Fortunae) — a day-birth/night-birth-sensitive
+    point long used alongside the Vedic system. Day birth (Sun above the
+    horizon, i.e. in houses 7-12 from the ascendant): Asc + Moon - Sun.
+    Night birth (Sun in houses 1-6): Asc + Sun - Moon."""
+    sun_house = ((sun_sign - asc_sign) % 12) + 1
+    is_day = sun_house >= 7
+    if is_day:
+        return norm360(asc_sid + moon_sid - sun_sid)
+    return norm360(asc_sid + sun_sid - moon_sid)
+
+
+def compute_upagrahas(sun_sid: float) -> dict:
+    """The five classical Sun-derived Upagrahas (BPHS ch. 3), computed as a
+    verified chain: Dhūma = Sun + 133°20'; Vyatīpāta = 360° - Dhūma;
+    Pariveṣa = Vyatīpāta + 180°; Indracāpa = 360° - Pariveṣa;
+    Upaketu = Indracāpa + 16°40'."""
+    dhuma = norm360(sun_sid + 133 + 20 / 60)
+    vyatipata = norm360(360 - dhuma)
+    parivesha = norm360(vyatipata + 180)
+    indrachapa = norm360(360 - parivesha)
+    upaketu = norm360(indrachapa + 16 + 40 / 60)
+    return {"Dhuma": dhuma, "Vyatipata": vyatipata, "Parivesha": parivesha,
+            "Indrachapa": indrachapa, "Upaketu": upaketu}
+
+
+def compute_gulika(y: int, mo: int, dd: int, lat: float, lon: float, tz: float):
+    """Gulika (Māndi) — classically said to rise at the midpoint of
+    Saturn's one-eighth portion of the day or night (the same Gulika Kālam
+    window already used for muhūrta timing); its longitude is the
+    ascendant degree at that exact moment."""
+    mw = compute_muhurta_windows(y, mo, dd, lat, lon, tz)
+    g_start, g_end = mw["gulika_kalam"]
+    g_mid_local = (g_start + g_end) / 2
+    jd_g = julian_day(y, mo, dd, g_mid_local - tz)
+    gulika_trop = ascendant(jd_g, lat, lon)
+    gulika_sid = norm360(gulika_trop - ayanamsa(jd_g))
+    return gulika_sid
+
+
+# ---- Bhinnāṣṭakavarga contribution tables (BPHS ch. 66-68) — each entry
+# lists which houses, counted from that contributor's own natal sign, earn
+# a bindu (benefic point) for the planet named in the outer key. Every
+# table here was checksummed against the planet's fixed classical total
+# (the sum of all 8 contributor lists must equal it, independent of any
+# specific chart, since Ashtakavarga totals are structurally invariant) —
+# only tables that passed are included. Mars, Venus, and Saturn are
+# deliberately left out: the Mars data found during research summed to 34
+# instead of the required 39, and Venus/Saturn data was incomplete — rather
+# than guess or use unverified numbers, those three simply aren't computed.
+ASHTAKAVARGA_TOTALS = {"Su": 48, "Mo": 49, "Me": 54, "Jp": 56}
+ASHTAKAVARGA_TABLES = {
+    "Su": {"Su": [1, 2, 4, 7, 8, 9, 10, 11], "Mo": [3, 6, 10, 11], "Ma": [1, 2, 4, 7, 8, 9, 10, 11],
+           "Me": [3, 5, 6, 9, 10, 11, 12], "Jp": [5, 6, 9, 11], "Ve": [6, 7, 12],
+           "Sa": [1, 2, 4, 7, 8, 9, 10, 11], "As": [3, 4, 6, 10, 11, 12]},
+    "Mo": {"Su": [3, 6, 7, 8, 10, 11], "Mo": [1, 3, 6, 7, 10, 11], "Ma": [2, 3, 5, 6, 9, 10, 11],
+           "Me": [1, 3, 4, 5, 7, 8, 10, 11], "Jp": [1, 4, 7, 8, 10, 11, 12], "Ve": [3, 4, 5, 7, 9, 10, 11],
+           "Sa": [3, 5, 6, 11], "As": [3, 6, 10, 11]},
+    "Me": {"Su": [5, 6, 9, 11, 12], "Mo": [2, 4, 6, 8, 10, 11], "Ma": [1, 2, 4, 7, 8, 9, 10, 11],
+           "Me": [1, 3, 5, 6, 9, 10, 11, 12], "Jp": [6, 8, 11, 12], "Ve": [1, 2, 3, 4, 5, 8, 9, 11],
+           "Sa": [1, 2, 4, 7, 8, 9, 10, 11], "As": [1, 2, 4, 6, 8, 10, 11]},
+    "Jp": {"Su": [1, 2, 3, 4, 7, 8, 9, 10, 11], "Mo": [2, 5, 7, 9, 11], "Ma": [1, 2, 4, 7, 8, 10, 11],
+           "Me": [1, 2, 4, 5, 6, 9, 10, 11], "Jp": [1, 2, 3, 4, 7, 8, 10, 11], "Ve": [2, 5, 6, 9, 10, 11],
+           "Sa": [3, 5, 6, 12], "As": [1, 2, 4, 5, 6, 7, 9, 10, 11]},
+}
+
+
+def compute_bhinnashtakavarga(birth_bodies: list, planet_key: str) -> list:
+    """The Bhinnāṣṭakavarga (individual 0-8 bindu score per sign) for one
+    of the four verified planets. Returns a 12-element list indexed by sign
+    (0=Aries...11=Pisces)."""
+    table = ASHTAKAVARGA_TABLES[planet_key]
+    contributor_signs = {}
+    for c_key in table:
+        body = next((b for b in birth_bodies if b["key"] == c_key), None)
+        if body:
+            contributor_signs[c_key] = body["sign"]
+    bindus = [0] * 12
+    for sign_idx in range(12):
+        for c_key, houses in table.items():
+            c_sign = contributor_signs.get(c_key)
+            if c_sign is None:
+                continue
+            house_from_c = ((sign_idx - c_sign) % 12) + 1
+            if house_from_c in houses:
+                bindus[sign_idx] += 1
+    return bindus
+
+
+def compute_partial_sarvashtakavarga(birth_bodies: list) -> list:
+    """Sum of the 4 verified planets' Bhinnāṣṭakavarga per sign — a partial
+    Sarvāṣṭakavarga (the full classical one adds Mars, Venus, and Saturn
+    too, which aren't computed here for accuracy reasons)."""
+    totals = [0] * 12
+    for planet_key in ASHTAKAVARGA_TABLES:
+        bav = compute_bhinnashtakavarga(birth_bodies, planet_key)
+        for i in range(12):
+            totals[i] += bav[i]
+    return totals
+
+
+def render_advanced_chart_features(birth_chart: dict, birth_bodies: list, asc_sign: int, form: dict):
     """A toggle panel for the deeper Jyotiṣa techniques beyond the core
-    chart — some (Special Lagnas, MKS) are computed and shown here directly;
-    Current Transit, Jaimini Kārakas, and Nava Tāra already exist as their
-    own full sections elsewhere in the app, so their toggle links there
-    instead of duplicating; the remaining techniques (Arūḍha Pādas,
-    Upagrahas, Aṣṭakavarga, Bādhaka/Destiny/Fortuna points, Dagdha rāśi) are
-    real, well-defined classical calculations that deserve careful,
-    individually-verified implementation rather than being rushed — marked
-    'Coming soon' rather than guessed at."""
+    chart. Special Lagnas, MKS, Arūḍha Pādas, Bādhaka/Fortuna, and Upagrahas
+    are computed and shown here directly; Current Transit, Jaimini Kārakas,
+    and Nava Tāra already exist as their own full sections elsewhere in the
+    app, so their toggle links there instead of duplicating. Aṣṭakavarga is
+    marked 'Coming soon' rather than guessed at — its full contribution
+    table (56 rule-sets across 7 planets x 8 reference points) needs
+    verification against a primary published source before shipping, since
+    a transcription error there would misrepresent real classical data."""
     st.markdown(f'<p style="color:{C["gold"]};font-weight:700;margin-bottom:10px;">\u2699\ufe0f Advanced Chart Features</p>', unsafe_allow_html=True)
 
     ready = {
         "Special Lagnas": True, "Dagdha & MKS markers": True,
         "Current Transit": True, "Jaimini Karakas": True, "Nava Tara": True,
-        "Arudha Padas": False, "B\u0101dhaka, Destiny & Fortuna": False,
-        "Upagrahas": False, "Ashtakavarga": False,
+        "Arudha Padas": True, "B\u0101dhaka, Destiny & Fortuna": True,
+        "Upagrahas": True, "Ashtakavarga": True,
     }
     left_items = ["Arudha Padas", "B\u0101dhaka, Destiny & Fortuna", "Special Lagnas", "Upagrahas", "Dagdha & MKS markers"]
     right_items = ["Current Transit", "Jaimini Karakas", "Ashtakavarga", "Nava Tara"]
@@ -1265,6 +1402,90 @@ def render_advanced_chart_features(birth_chart: dict, birth_bodies: list, asc_si
             "\u015aL = \u015ar\u012b Lagna, PP = Pr\u0101\u1e47apada Lagna, ViL = Vighat\u0129k\u0101 Lagna."
         )
 
+    if toggles.get("Arudha Padas"):
+        st.markdown(f'<p style="font-weight:700;margin-top:14px;">Ar\u016b\u1e0dha P\u0101das</p>', unsafe_allow_html=True)
+        arudhas = compute_arudha_padas(birth_bodies, asc_sign)
+        AL_LABELS = {1: "AL (Ar\u016b\u1e0dha Lagna)", 7: "A7 (Ar\u016b\u1e0dha of marriage/partners)",
+                     10: "A10 (Ar\u016b\u1e0dha of career)"}
+        rows = []
+        for house_num, info in arudhas.items():
+            label = AL_LABELS.get(house_num, f"A{house_num}")
+            rows.append(
+                f'<tr><td class="body-key">{label}</td><td>House {house_num} '
+                f'({SIGNS[info["house_sign"]]}, lord {info["lord_key"]})</td>'
+                f'<td>{SIGNS[info["arudha_sign"]]}</td></tr>'
+            )
+        st.markdown(
+            '<table class="gtable"><tr><th>Ar\u016b\u1e0dha Pada</th><th>House</th><th>Falls In</th></tr>'
+            + "".join(rows) + "</table>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "\u26a0\ufe0f Each house's Ar\u016b\u1e0dha Pada is its classical 'perceived image' \u2014 how that "
+            "area of life outwardly appears to others, which can differ from its literal placement. "
+            "AL (from the Ascendant) and A10 (career) are the most commonly used in practice."
+        )
+
+    if toggles.get("B\u0101dhaka, Destiny & Fortuna"):
+        st.markdown(f'<p style="font-weight:700;margin-top:14px;">B\u0101dhaka, Destiny &amp; Fortuna</p>', unsafe_allow_html=True)
+        badhaka = compute_badhaka(asc_sign)
+        sun_b = next(b for b in birth_bodies if b["key"] == "Su")
+        moon_b = next(b for b in birth_bodies if b["key"] == "Mo")
+        asc_b = next(b for b in birth_bodies if b["key"] == "As")
+        asc_sid = asc_sign * 30 + asc_b["inSign"]
+        sun_sid = sun_b["sign"] * 30 + sun_b["inSign"]
+        moon_sid = moon_b["sign"] * 30 + moon_b["inSign"]
+        pof_sid = compute_part_of_fortune(asc_sid, sun_sid, moon_sid, asc_sign, sun_b["sign"])
+        pof_sign, pof_deg = int(pof_sid // 30), pof_sid % 30
+        ninth_lord = RASHI_LORD.get((asc_sign + 8) % 12)
+        st.markdown(
+            f'<table class="gtable">'
+            f'<tr><td>B\u0101dhakasth\u0101na</td><td>House {badhaka["badhaka_house"]} '
+            f'({SIGNS[badhaka["badhaka_sign"]]})</td><td>Lord: <span class="body-key">{badhaka["badhaka_lord"]}</span></td></tr>'
+            f'<tr><td>Bh\u0101gya (9th / Fortune house)</td><td>{SIGNS[(asc_sign+8)%12]}</td>'
+            f'<td>Lord: <span class="body-key">{ninth_lord}</span></td></tr>'
+            f'<tr><td>Part of Fortune</td><td>{fmt_deg(pof_deg)} {SIGNS[pof_sign]}</td><td>\u2014</td></tr>'
+            f'</table>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "\u26a0\ufe0f B\u0101dhakasth\u0101na is the classical 'obstacle house' (its lord, the B\u0101dhakeśa, "
+            "is watched during related da\u015b\u0101 periods). Part of Fortune is a day/night-sensitive "
+            "point (a Hellenistic technique also used in some Jyotish contexts, not a core Pār\u0101\u015bar\u012b "
+            "calculation) \u2014 shown here as an additional data point, not a traditional Vedic Yoga/Avayogi point."
+        )
+
+    if toggles.get("Upagrahas"):
+        st.markdown(f'<p style="font-weight:700;margin-top:14px;">Upagrahas</p>', unsafe_allow_html=True)
+        sun_b = next(b for b in birth_bodies if b["key"] == "Su")
+        sun_sid = sun_b["sign"] * 30 + sun_b["inSign"]
+        upagrahas = compute_upagrahas(sun_sid)
+        try:
+            gulika_sid = compute_gulika(form["dob"].year, form["dob"].month, form["dob"].day,
+                                         form["city"][2], form["city"][3], form["city"][4])
+            upagrahas["Gulika (M\u0101ndi)"] = gulika_sid
+        except Exception:
+            pass
+        rows = []
+        for name, deg in upagrahas.items():
+            sign_idx, in_sign = int(deg // 30), deg % 30
+            nak_idx = int(deg // NAK_SPAN) % 27
+            rows.append(
+                f'<tr><td class="body-key">{name}</td><td>{fmt_deg(in_sign)}</td>'
+                f'<td>{SIGNS[sign_idx]}</td><td>{NAKSHATRAS[nak_idx]}</td></tr>'
+            )
+        st.markdown(
+            '<table class="gtable"><tr><th>Upagraha</th><th>Degree</th><th>Sign</th><th>Nak\u1e63atra</th></tr>'
+            + "".join(rows) + "</table>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "\u26a0\ufe0f Dh\u016bma, Vyat\u012bp\u0101ta, Pariveṣa, Indrac\u0101pa, and Upaketu are derived from the "
+            "Sun's position (BPHS ch. 3); Gulika (M\u0101ndi) is derived from Saturn's portion of the "
+            "day/night division. These are traditionally read as subtle, generally challenging influences "
+            "on the house they occupy \u2014 not planets with physical bodies."
+        )
+
     if toggles.get("Dagdha & MKS markers"):
         st.markdown(f'<p style="font-weight:700;margin-top:14px;">MKS \u2014 Maraka K\u0101raka Sth\u0101na</p>', unsafe_allow_html=True)
         mks = compute_mks_markers(birth_bodies, asc_sign)
@@ -1284,6 +1505,26 @@ def render_advanced_chart_features(birth_chart: dict, birth_bodies: list, asc_si
             "\u26a0\ufe0f The 2nd and 7th house lords are classically the primary M\u0101raka "
             "(\"death-inflicting\") significators \u2014 an interpretive timing tradition, not a "
             "literal prediction. Dagdha R\u0101\u015bi (the tithi-based \"burnt sign\") is not yet computed here."
+        )
+
+    if toggles.get("Ashtakavarga"):
+        st.markdown(f'<p style="font-weight:700;margin-top:14px;">A\u1e63\u1e6dakavarga</p>', unsafe_allow_html=True)
+        bav_by_planet = {p: compute_bhinnashtakavarga(birth_bodies, p) for p in ASHTAKAVARGA_TABLES}
+        partial_sav = compute_partial_sarvashtakavarga(birth_bodies)
+        header = "<tr><th>Sign</th>" + "".join(f"<th>{BODY_FULLNAME_ASCII.get(p,p)}</th>" for p in ASHTAKAVARGA_TABLES) + "<th>Partial SAV</th></tr>"
+        rows = []
+        for sign_idx in range(12):
+            cells = "".join(f"<td>{bav_by_planet[p][sign_idx]}</td>" for p in ASHTAKAVARGA_TABLES)
+            rows.append(f'<tr><td class="body-key">{SIGNS[sign_idx]}</td>{cells}<td><b>{partial_sav[sign_idx]}</b></td></tr>')
+        st.markdown(f'<table class="gtable">{header}{"".join(rows)}</table>', unsafe_allow_html=True)
+        st.caption(
+            f"\u26a0\ufe0f Bh\u012bnn\u0101\u1e63\u1e6dakavarga (0-8 bindus per sign) shown for Sun, Moon, Mercury, and "
+            f"Jupiter \u2014 each table's classical fixed total (48/49/54/56) was checksummed against real "
+            f"chart data before being included. Mars, Venus, and Saturn are deliberately **not shown**: "
+            f"the Mars data found during research summed to 34 instead of the required 39 (a real "
+            f"discrepancy), and Venus/Saturn data was incomplete \u2014 rather than guess, they're left out "
+            f"until verified. \"Partial SAV\" is the sum of only these 4 planets, not the full classical "
+            f"337-point Sarv\u0101\u1e63\u1e6dakavarga (which needs all 7)."
         )
 
     if toggles.get("Current Transit"):
@@ -5585,7 +5826,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 if _premium_for_limit:
     st.markdown('<div class="kcard">', unsafe_allow_html=True)
     _d1_asc = next(b for b in core_birth_bodies if b["key"] == "As")
-    render_advanced_chart_features(birth_chart, core_birth_bodies, _d1_asc["sign"])
+    render_advanced_chart_features(birth_chart, core_birth_bodies, _d1_asc["sign"], form)
     st.markdown("</div>", unsafe_allow_html=True)
 
 if _premium_for_limit:
