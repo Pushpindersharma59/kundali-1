@@ -3473,13 +3473,13 @@ def render_planetspath_solar_with_features():
 
 FEATURE_STRIP = [
     ("\u25c8", "Kundali Analysis", "Detailed insights from your real birth chart", None),
+    ("\U0001f9ee", "BCP Research Chakra", "Your running year, activated house, and cycle-ruler research", "section-bcp"),
     ("\U0001f504", "Nakshatra Live & Transits", "Today's tithi, nakshatra, and live planetary positions", "section-transit"),
     ("\U0001f4ff", "Day-wise Remedies", "Gemstones, colours & practices for each weekday", "section-remedies"),
     ("\U0001f319", "Navtara Chakra", "Auspicious-day calendar based on your own nakshatra", "section-navtara"),
     ("\U0001f549\ufe0f", "Panchang & Muhurta", "Daily panchang, hora timings, and auspicious windows", "section-muhurta"),
     ("\U0001f49e", "Compatibility", "Match your kundali against a partner's, graha by graha", "section-compat"),
     ("\U0001f4c1", "Charts", "Save, revisit, and manage your birth charts", "section-charts"),
-    ("\U0001f522", "Numerology", "Life Path, Destiny, Soul Urge — Pythagorean and Chaldean", "section-numerology"),
 ]
 
 
@@ -6486,11 +6486,6 @@ now_utc = datetime.utcnow()
 tdict = {t["key"]: t for t in transit_chart["bodies"]}
 core_birth_bodies = [b for b in birth_chart["bodies"] if b["key"] in CORE_KEYS]
 core_transit_bodies = [b for b in transit_chart["bodies"] if b["key"] in CORE_KEYS]
-
-if _premium_for_limit:
-    _dash_running = compute_running_dashas(birth_chart, core_birth_bodies)
-    render_chart_summary_dashboard(birth_chart, core_birth_bodies, core_transit_bodies, form, _dash_running)
-    render_dashboard_hub()
 
 # ---- Chart display toggles: read the current (prior-run) values now so
 # they affect this run's chart rendering; the actual widgets are drawn below
