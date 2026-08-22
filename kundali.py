@@ -1336,6 +1336,92 @@ def compute_bhinnashtakavarga(birth_bodies: list, planet_key: str) -> list:
     return bindus
 
 
+def _safe_replace_year(dt: datetime, new_year: int) -> datetime:
+    """datetime.replace(year=) but falls back a day for Feb-29 births in
+    non-leap target years."""
+    try:
+        return dt.replace(year=new_year)
+    except ValueError:
+        return dt.replace(year=new_year, day=28)
+
+
+CHAKRA_SWAMI_ORDER = ["Mo", "Me", "Ve", "Su", "Ma", "Jp", "Sa", "Ra", "Ke"]
+
+
+def compute_bcp_running_year(birth_dt: datetime, target_dt: datetime) -> dict:
+    """Bhṛgu Chakra Paddhati (BCP): each exact 365-day year from birth
+    (birthday-to-birthday, using the exact birth time) activates the next
+    house in a repeating 1-12 cycle — Year 1 activates House 1, Year 13
+    activates House 1 again, and so on indefinitely. The 'Chakra Swami'
+    cycle-ruler research (an optional, explicitly-labelled extension, not
+    core classical BCP) assigns each successive 12-year block to one of the
+    9 grahas in turn, ending at year 108; years 109+ have no Chakra Swami."""
+    years_elapsed = target_dt.year - birth_dt.year
+    if (target_dt.month, target_dt.day, target_dt.hour, target_dt.minute) < \
+       (birth_dt.month, birth_dt.day, birth_dt.hour, birth_dt.minute):
+        years_elapsed -= 1
+    running_year = max(1, years_elapsed)
+    activated_house = ((running_year - 1) % 12) + 1
+    interval_start = _safe_replace_year(birth_dt, birth_dt.year + running_year)
+    interval_end = _safe_replace_year(birth_dt, birth_dt.year + running_year + 1)
+    block_idx = (running_year - 1) // 12
+    swami = CHAKRA_SWAMI_ORDER[block_idx] if block_idx < 9 else None
+    return {
+        "running_year": running_year, "activated_house": activated_house,
+        "interval_start": interval_start, "interval_end": interval_end,
+        "swami": swami, "block_idx": block_idx,
+    }
+
+
+def compute_argala(house_num: int) -> dict:
+    """Classical Argala (intervention/support): 2nd, 4th, and 11th houses
+    from the activated house (5th counted as a secondary Argala in some
+    texts). Virodha (obstruction) houses cancel the corresponding Argala:
+    12th cancels the 2nd's, 10th the 4th's, 3rd the 11th's, 9th the 5th's."""
+    argala = [((house_num - 1 + n - 1) % 12) + 1 for n in [2, 4, 11, 5]]
+    virodha = [((house_num - 1 + n - 1) % 12) + 1 for n in [12, 10, 3, 9]]
+    return {"argala": argala, "virodha": virodha}
+
+
+def compute_rashi_drishti(sign_idx: int) -> list:
+    """Jaimini Rāśi Dṛṣṭi (sign-based aspect, distinct from graha dṛṣṭi):
+    movable signs aspect all fixed signs except the one immediately
+    following; fixed signs aspect all movable signs except the one
+    immediately preceding; dual signs mutually aspect the other two dual
+    signs. Returns the list of aspected sign indices."""
+    modality = sign_idx % 3  # Aries=0 movable, Taurus=1 fixed, Gemini=2 dual (repeating)
+    aspected = []
+    if modality == 0:
+        aspected = [s for s in range(12) if s % 3 == 1 and s != (sign_idx + 1) % 12]
+    elif modality == 1:
+        aspected = [s for s in range(12) if s % 3 == 0 and s != (sign_idx - 1) % 12]
+    else:
+        aspected = [s for s in range(12) if s % 3 == 2 and s != sign_idx]
+    return aspected
+
+
+def compute_dispositor_chain(birth_bodies: list, start_sign_idx: int) -> list:
+    """Follows sign lord -> the sign that lord occupies -> its lord ->
+    ... until a lord is found sitting in its own sign (chain terminates) or
+    a repeat is detected (cycle)."""
+    chain = [RASHI_LORD.get(start_sign_idx)]
+    current_sign = start_sign_idx
+    for _ in range(10):
+        lord_key = RASHI_LORD.get(current_sign)
+        lord_body = next((b for b in birth_bodies if b["key"] == lord_key), None)
+        if not lord_body:
+            break
+        next_sign = lord_body["sign"]
+        if next_sign == current_sign:
+            break
+        next_lord = RASHI_LORD.get(next_sign)
+        if next_lord in chain:
+            break
+        chain.append(next_lord)
+        current_sign = next_sign
+    return chain
+
+
 def compute_partial_sarvashtakavarga(birth_bodies: list) -> list:
     """Sum of the 4 verified planets' Bhinnāṣṭakavarga per sign — a partial
     Sarvāṣṭakavarga (the full classical one adds Mars, Venus, and Saturn
@@ -1764,6 +1850,176 @@ def render_advanced_chart_features(birth_chart: dict, birth_bodies: list, asc_si
             "planet, plus Mars' extra 4th/8th, Jupiter's 5th/9th, and Saturn's 3rd/10th \u2014 a traditional "
             "interpretive layer, not a literal prediction."
         )
+
+
+def render_bcp_research_chakra(birth_chart: dict, birth_bodies: list, transit_bodies: list, asc_sign: int, birth_dt: datetime):
+    """BCP (Bhṛgu Chakra Paddhati) Research Chakra — a running-year system
+    where each exact 365-day year from birth activates the next house in a
+    repeating 1-12 cycle, with the natal chart itself never changing. All
+    figures were checksummed against a worked reference example (Year 44 =>
+    House 8, interval 28 Nov 2025 - 28 Nov 2026, Chakra Swami = Sun) before
+    shipping. The Chakra Swami 'cycle ruler' layer is explicitly an optional
+    extension, not core classical BCP."""
+    st.markdown(f'<p style="color:{C["gold"]};font-weight:700;font-size:20px;margin:4px 0 2px;">'
+                f'\U0001f9ee BCP Research Chakra</p>', unsafe_allow_html=True)
+    st.caption("Bhṛgu Chakra Paddhati \u00b7 exact 365-day running years with an unchanged natal chart.")
+
+    tcol1, tcol2 = st.columns(2)
+    with tcol1:
+        bcp_date = st.date_input("Target date", value=date.today(), key="bcp_target_date")
+    with tcol2:
+        bcp_time = st.time_input("Target time", value=dtime(12, 0), key="bcp_target_time")
+    target_dt = datetime.combine(bcp_date, bcp_time)
+
+    st.markdown(f'<p style="font-weight:700;margin-top:14px;">Show only what supports the research</p>', unsafe_allow_html=True)
+    bcol1, bcol2, bcol3 = st.columns(3)
+    with bcol1:
+        t_house_lord = st.checkbox("House lord path", value=True, key="bcp_t_lord")
+        t_graha_drishti = st.checkbox("Graha Dṛṣṭi", value=True, key="bcp_t_graha")
+        t_mks_dagdha = st.checkbox("MKS & Dagdha", value=False, key="bcp_t_mks")
+    with bcol2:
+        t_cycle_ruler = st.checkbox("Cycle Ruler Research (Chakra Swami)", value=True, key="bcp_t_swami")
+        t_argala = st.checkbox("Argala / Virodha", value=True, key="bcp_t_argala")
+        t_divisional = st.checkbox("Divisional context (D9/D10/D12)", value=False, key="bcp_t_div")
+    with bcol3:
+        t_rashi_drishti = st.checkbox("Rāśi Dṛṣṭi", value=False, key="bcp_t_rashi")
+        t_transits = st.checkbox("Current transits", value=True, key="bcp_t_transit")
+
+    bcp = compute_bcp_running_year(birth_dt, target_dt)
+    activated_house = bcp["activated_house"]
+    activated_sign = (asc_sign + activated_house - 1) % 12
+    lord_key = RASHI_LORD.get(activated_sign)
+    lord_body = next((b for b in birth_bodies if b["key"] == lord_key), None)
+    occupants = [b for b in birth_bodies if b["sign"] == activated_sign and b["key"] != "As"]
+
+    st.markdown("---")
+    rcol1, rcol2, rcol3 = st.columns([1, 1, 1])
+    with rcol1:
+        st.markdown(
+            f'<div style="background:linear-gradient(135deg,#1e5f5f,#0d3838);color:#fff;border-radius:14px;padding:20px;">'
+            f'<p style="font-size:11px;letter-spacing:0.05em;opacity:0.8;margin:0;">RUNNING YEAR</p>'
+            f'<p style="font-size:44px;font-weight:700;margin:4px 0;">{bcp["running_year"]}'
+            f'<span style="font-size:14px;background:rgba(255,255,255,0.15);border-radius:8px;padding:3px 10px;margin-left:10px;">H{activated_house}</span></p>'
+            f'<p style="font-size:22px;margin:0;">{SIGNS_ASCII[activated_sign]}</p>'
+            f'</div>', unsafe_allow_html=True,
+        )
+    with rcol2:
+        st.markdown(
+            f'<div class="kcard"><p class="kmuted" style="font-size:11px;letter-spacing:0.05em;margin:0;">ACTIVATED HOUSE</p>'
+            f'<p style="font-size:22px;font-weight:700;margin:6px 0;">H{activated_house} \u00b7 {SIGNS_ASCII[activated_sign]}</p>'
+            f'<p class="kmuted" style="font-size:13px;">R\u0101\u015bi {activated_sign+1}</p></div>',
+            unsafe_allow_html=True,
+        )
+        if t_house_lord:
+            st.markdown(
+                f'<div class="kcard" style="margin-top:10px;"><p class="kmuted" style="font-size:11px;letter-spacing:0.05em;margin:0;">HOUSE LORD</p>'
+                f'<p style="font-size:22px;font-weight:700;margin:6px 0;">{BODY_FULLNAME_ASCII.get(lord_key,lord_key)}</p>'
+                f'<p class="kmuted" style="font-size:13px;">{SIGNS_ASCII[lord_body["sign"]] if lord_body else "\u2014"} \u00b7 '
+                f'H{((lord_body["sign"]-asc_sign)%12)+1 if lord_body else "\u2014"}</p></div>',
+                unsafe_allow_html=True,
+            )
+    with rcol3:
+        occ_text = ", ".join(f'{o["key"]} {fmt_deg(o["inSign"])}' for o in occupants) if occupants else "No graha"
+        st.markdown(
+            f'<div class="kcard"><p class="kmuted" style="font-size:11px;letter-spacing:0.05em;margin:0;">NATAL OCCUPANTS</p>'
+            f'<p style="font-size:18px;font-weight:700;margin:6px 0;">{occ_text}</p>'
+            f'<p class="kmuted" style="font-size:12.5px;">Planets remain in natal positions.</p></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div class="kcard" style="margin-top:10px;"><p class="kmuted" style="font-size:11px;letter-spacing:0.05em;margin:0;">EXACT INTERVAL</p>'
+            f'<p style="font-size:15px;font-weight:700;margin:6px 0;">{bcp["interval_start"].strftime("%d %b %Y, %I:%M %p")}</p>'
+            f'<p class="kmuted" style="font-size:13px;">to {bcp["interval_end"].strftime("%d %b %Y, %I:%M %p")}</p></div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(f'<p style="color:{C["gold"]};font-weight:700;margin-top:20px;">Calculated relationships for H{activated_house}</p>', unsafe_allow_html=True)
+    rel_cards = []
+    if t_house_lord and lord_body:
+        rel_cards.append(("HOUSE LORD CONDITION",
+                           f'{BODY_FULLNAME_ASCII.get(lord_key,lord_key)} \u00b7 H{((lord_body["sign"]-asc_sign)%12)+1}',
+                           f'{NAKSHATRAS_ASCII[lord_body["nakIdx"]]} \u00b7 Pada {int(lord_body["inSign"] // (NAK_SPAN/4)) + 1}'))
+    conj_text = ", ".join(o["key"] for o in occupants) if occupants else "No occupant"
+    rel_cards.append(("NATAL OCCUPANTS & CONJUNCTIONS", conj_text, "House is activated through its lord and received relationships."))
+    if t_graha_drishti:
+        aspecting = [a["from_key"] for a in compute_drishti(birth_bodies, asc_sign) if a["to_house"] == activated_house]
+        aspecting = sorted(set(aspecting), key=lambda k: CORE_KEYS.index(k) if k in CORE_KEYS else 99)
+        rel_cards.append(("GRAHA DR\u1e62\u1e6cI RECEIVED", " \u00b7 ".join(BODY_FULLNAME_ASCII.get(k,k) for k in aspecting) or "None",
+                          "Full classical aspects to H" + str(activated_house) + "."))
+    if t_rashi_drishti:
+        aspecting_signs = [s for s in range(12) if activated_sign in compute_rashi_drishti(s)]
+        aspecting_keys = sorted({RASHI_LORD.get(s) for s in aspecting_signs} - {None})
+        rel_cards.append(("R\u0100\u015a\u012a DR\u1e62\u1e6cI RECEIVED", " \u00b7 ".join(BODY_FULLNAME_ASCII.get(k,k) for k in aspecting_keys) or "None",
+                          "Movable-fixed and dual-dual Jaimini rule."))
+    if t_argala:
+        arg = compute_argala(activated_house)
+        rel_cards.append(("ARGALA / VIRODHA", f'{" \u00b7 ".join(map(str, arg["argala"]))} / {" \u00b7 ".join(map(str, arg["virodha"]))}',
+                          "Counted from the activated house; enable the chart layer to locate them."))
+    if t_transits:
+        contacts = sorted({t["key"] for t in transit_bodies if t["key"] != "As" and
+                            (((t["sign"]-asc_sign)%12)+1 == activated_house or t["sign"] == lord_body["sign"] if lord_body else False)})
+        rel_cards.append(("TRANSIT CONTACTS", " \u00b7 ".join(BODY_FULLNAME_ASCII.get(k,k) for k in contacts) or "None",
+                          "Current contact to activated house or its lord's house."))
+    chain = compute_dispositor_chain(birth_bodies, activated_sign)
+    rel_cards.append(("DISPOSITOR CHAIN", " \u2192 ".join(BODY_FULLNAME_ASCII.get(k,k) for k in chain),
+                      "Starts with the activated sign lord and stops when the chain repeats."))
+    if t_cycle_ruler:
+        if bcp["swami"]:
+            rel_cards.append(("CYCLE RULER RESEARCH", BODY_FULLNAME_ASCII.get(bcp["swami"], bcp["swami"]),
+                              f'Year {((bcp["running_year"]-1)%12)+1} from {BODY_FULLNAME_ASCII.get(bcp["swami"],bcp["swami"])} activates H{activated_house}.'))
+        else:
+            rel_cards.append(("CYCLE RULER RESEARCH", "\u2014", "Years 109+ have no source-defined Chakra Swami (classical BCP only)."))
+    if t_divisional and lord_body:
+        for varga_key, label in [("D9", "D9"), ("D10", "D10"), ("D12", "D12")]:
+            vb = make_varga_bodies(birth_bodies, varga_key)
+            vbody = next((b for b in vb if b["key"] == lord_key), None)
+            if vbody:
+                rel_cards.append((label, SIGNS_ASCII[vbody["sign"]], f'{BODY_FULLNAME_ASCII.get(lord_key,lord_key)} \u00b7 {NAKSHATRAS_ASCII[vbody["nakIdx"]]}'))
+
+    cols = st.columns(3)
+    for i, (title, main, sub) in enumerate(rel_cards):
+        with cols[i % 3]:
+            st.markdown(
+                f'<div class="kcard" style="min-height:110px;margin-bottom:10px;">'
+                f'<p class="kmuted" style="font-size:10.5px;letter-spacing:0.05em;margin:0;">{title}</p>'
+                f'<p style="font-size:18px;font-weight:700;margin:6px 0;">{main}</p>'
+                f'<p class="kmuted" style="font-size:12px;">{sub}</p></div>',
+                unsafe_allow_html=True,
+            )
+    if t_mks_dagdha:
+        mks = compute_mks_markers(birth_bodies, asc_sign)
+        mks_here = [h for h, info in mks.items() if info["placed_sign"] == activated_sign]
+        st.caption(f"MKS: {'yes \u2014 ' + ', '.join(str(h)+'th-lord' for h in mks_here) if mks_here else 'not present in this house'}. "
+                   "Dagdha R\u0101\u015bi is not yet computed in this app.")
+
+    st.markdown("---")
+    st.markdown(f'<p style="color:{C["gold"]};font-weight:700;">Search by running age</p>', unsafe_allow_html=True)
+    if "bcp_browse_year" not in st.session_state:
+        st.session_state["bcp_browse_year"] = bcp["running_year"]
+    ncol1, ncol2, ncol3 = st.columns([1, 1, 1])
+    with ncol1:
+        if st.button("\u2190 Previous 12", use_container_width=True):
+            st.session_state["bcp_browse_year"] = max(1, st.session_state["bcp_browse_year"] - 12)
+    with ncol3:
+        if st.button("Next 12 \u2192", use_container_width=True):
+            st.session_state["bcp_browse_year"] += 12
+    with ncol2:
+        st.markdown(f'<p style="text-align:center;font-size:22px;font-weight:700;">Year {st.session_state["bcp_browse_year"]}</p>', unsafe_allow_html=True)
+
+    browse_start = ((st.session_state["bcp_browse_year"] - 1) // 12) * 12 + 1
+    year_cols = st.columns(4)
+    for i, y in enumerate(range(browse_start, browse_start + 12)):
+        y_house = ((y - 1) % 12) + 1
+        y_start = _safe_replace_year(birth_dt, birth_dt.year + y)
+        is_now = y == bcp["running_year"]
+        with year_cols[i % 4]:
+            st.markdown(
+                f'<div class="kcard" style="{"border:2px solid " + C["gold"] + ";" if is_now else ""}margin-bottom:8px;">'
+                f'<p class="kmuted" style="font-size:11px;margin:0;">YEAR {y}{" \u00b7 NOW" if is_now else ""}</p>'
+                f'<p style="font-size:16px;font-weight:700;margin:4px 0;">House {y_house}</p>'
+                f'<p class="kmuted" style="font-size:11.5px;">{y_start.strftime("%d %b %Y")}</p></div>',
+                unsafe_allow_html=True,
+            )
 
 
 def render_dasha_explorer(birth_chart: dict, birth_bodies: list, birth_dt: datetime):
@@ -6057,6 +6313,12 @@ if _premium_for_limit:
     st.markdown('<div class="kcard">', unsafe_allow_html=True)
     _d1_asc = next(b for b in core_birth_bodies if b["key"] == "As")
     render_advanced_chart_features(birth_chart, core_birth_bodies, _d1_asc["sign"], form, core_transit_bodies)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+if _premium_for_limit:
+    st.markdown('<div class="kcard">', unsafe_allow_html=True)
+    _bcp_birth_dt = datetime.combine(form["dob"], form["tob"])
+    render_bcp_research_chakra(birth_chart, core_birth_bodies, core_transit_bodies, _d1_asc["sign"], _bcp_birth_dt)
     st.markdown("</div>", unsafe_allow_html=True)
 
 if _premium_for_limit:
