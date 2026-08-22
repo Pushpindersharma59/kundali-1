@@ -1430,8 +1430,9 @@ def build_advanced_kundali_svg(birth_bodies, transit_bodies, asc_sign, tags_by_h
                                 show_transits=True):
     """The Advanced Kundali Chart — a bigger, separate diamond chart (does
     not touch or replace build_svg_chart) that overlays every toggle-active
-    system's labels underneath each house's core planet list, plus an
-    optional dṛṣṭi (aspect) line layer."""
+    system's labels underneath each house's core planet list. Dṛṣṭi (aspect)
+    lines for a given planet are drawn but hidden by default, revealed only
+    by clicking that planet's label (via the accompanying JS)."""
     size = 760
     cx = cy = size / 2
     parts = [f'<svg viewBox="0 0 {size} {size}" width="{size}" height="{size}" '
@@ -1445,13 +1446,19 @@ def build_advanced_kundali_svg(birth_bodies, transit_bodies, asc_sign, tags_by_h
     scale = size / 400
     house_centers = [(x * scale, y * scale) for x, y in HOUSE_CENTERS]
 
-    if drishti:
-        for a in drishti:
+    # Dṛṣṭi lines: grouped per source planet, hidden until that planet is clicked.
+    drishti_by_planet = {}
+    for a in drishti:
+        drishti_by_planet.setdefault(a["from_key"], []).append(a)
+    for key, aspects in drishti_by_planet.items():
+        color = PLANET_TRANSIT_COLORS.get(key, C["muted"])
+        parts.append(f'<g id="drishti-{key}" class="drishti-group" style="display:none;">')
+        for a in aspects:
             fx, fy = house_centers[a["from_house"] - 1]
             tx, ty = house_centers[a["to_house"] - 1]
-            color = PLANET_TRANSIT_COLORS.get(a["from_key"], C["muted"])
             parts.append(f'<line x1="{fx:.1f}" y1="{fy:.1f}" x2="{tx:.1f}" y2="{ty:.1f}" '
-                         f'stroke="{color}" stroke-width="1" opacity="0.28" stroke-dasharray="2,3"/>')
+                         f'stroke="{color}" stroke-width="1.8" opacity="0.55" stroke-dasharray="4,3"/>')
+        parts.append('</g>')
 
     by_house = {h: {"b": [], "t": []} for h in range(1, 13)}
     for x in birth_bodies:
@@ -1481,12 +1488,14 @@ def build_advanced_kundali_svg(birth_bodies, transit_bodies, asc_sign, tags_by_h
         parts.append(f'<text x="{cx_h:.1f}" y="{start_y - 12:.1f}" text-anchor="middle" font-size="13" font-weight="700" '
                       f'fill="{C["muted"]}" font-family="monospace">{sign_idx + 1}</text>')
         for i, (x, kind) in enumerate(entries):
-            fill = C["moon"] if x["key"] == "As" else PLANET_TRANSIT_COLORS.get(x["key"], C["ivory"])
+            is_transit = kind == "t"
+            fill = C["moon"] if x["key"] == "As" else (PLANET_TRANSIT_COLORS.get(x["key"], C["ivory"]) if is_transit else "#1a1a1a")
             retro = " \u211e" if (x.get("retro") and x["key"] not in ("Ra", "Ke")) else ""
-            prefix = "TR " if kind == "t" else ""
+            has_drishti = x["key"] in drishti_by_planet
+            click_attr = f' onclick="toggleDrishti(\'{x["key"]}\')" style="cursor:pointer;"' if has_drishti else ""
             parts.append(f'<text x="{cx_h:.1f}" y="{start_y + i*row_h:.1f}" text-anchor="middle" '
-                          f'font-size="{base_font:.1f}" font-weight="700" fill="{fill}" font-family="Georgia, serif">'
-                          f'{prefix}{x["key"]} {fmt_deg(x["inSign"])}{retro}</text>')
+                          f'font-size="{base_font:.1f}" font-weight="700" fill="{fill}" font-family="Georgia, serif"{click_attr}>'
+                          f'{x["key"]} {fmt_deg(x["inSign"])}{retro}</text>')
 
         tags = tags_by_house.get(h, [])
         if tags:
@@ -1705,21 +1714,39 @@ def render_advanced_chart_features(birth_chart: dict, birth_bodies: list, asc_si
                     f'\U0001f5fa\ufe0f Advanced Kundali Chart</p>', unsafe_allow_html=True)
         st.caption(
             "A separate, additional chart \u2014 shows every toggle-enabled system above directly on the "
-            "diamond chart, instead of as tables. Your main Kundali chart further up the page is untouched."
+            "diamond chart, instead of as tables. Your main Kundali chart further up the page is untouched. "
+            "Natal planets are shown in black; transit planets keep their own colours. "
+            "**Click any planet with a coloured underline-style cursor to reveal its Dṛṣṭi (aspect) lines** \u2014 "
+            "click it again, or another planet, to switch."
         )
         acol1, acol2 = st.columns([1, 1])
         with acol1:
-            show_drishti = st.checkbox("Show Dṛṣṭi (aspect lines)", value=False, key="adv_show_drishti")
+            enable_drishti = st.checkbox("Enable Dṛṣṭi (click a planet to reveal its aspects)", value=True, key="adv_enable_drishti")
         with acol2:
             show_adv_transits = st.checkbox("Show Transits on this chart", value=True, key="adv_show_transits")
 
         tags_by_house = compute_advanced_house_tags(birth_bodies, transit_bodies, asc_sign, toggles)
-        drishti = compute_drishti(birth_bodies, asc_sign) if show_drishti else []
+        drishti = compute_drishti(birth_bodies, asc_sign) if enable_drishti else []
         adv_svg = build_advanced_kundali_svg(
             birth_bodies, transit_bodies, asc_sign, tags_by_house, drishti,
             show_transits=show_adv_transits,
         )
-        st.markdown(f'<div style="display:flex;justify-content:center;">{adv_svg}</div>', unsafe_allow_html=True)
+        adv_html = f"""
+        <div style="display:flex;justify-content:center;">{adv_svg}</div>
+        <script>
+        function toggleDrishti(key) {{
+            var groups = document.querySelectorAll('.drishti-group');
+            groups.forEach(function(g) {{
+                if (g.id === 'drishti-' + key) {{
+                    g.style.display = (g.style.display === 'none' || g.style.display === '') ? 'block' : 'none';
+                }} else {{
+                    g.style.display = 'none';
+                }}
+            }});
+        }}
+        </script>
+        """
+        st.components.v1.html(adv_html, height=790, scrolling=False)
 
         legend_html = "".join(
             f'<span style="background:{bg};color:{fg};border:1px solid {fg}55;border-radius:6px;'
