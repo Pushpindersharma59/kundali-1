@@ -1427,7 +1427,7 @@ ADVANCED_TAG_COLORS = {
 
 
 def build_advanced_kundali_svg(birth_bodies, transit_bodies, asc_sign, tags_by_house, drishti,
-                                show_transits=True, font_scale=1.0):
+                                show_transits=True):
     """The Advanced Kundali Chart — a bigger, separate diamond chart (does
     not touch or replace build_svg_chart) that overlays every toggle-active
     system's labels underneath each house's core planet list, plus an
@@ -1466,8 +1466,9 @@ def build_advanced_kundali_svg(birth_bodies, transit_bodies, asc_sign, tags_by_h
             h = ((x["sign"] - asc_sign) % 12) + 1
             by_house[h]["t"].append(x)
 
-    base_font = 12 * font_scale
-    tag_font = 9 * font_scale
+    base_font = 16
+    tag_font = 10.5
+    font_scale = 1.0
 
     for h in range(1, 13):
         cx_h, cy_h = house_centers[h - 1]
@@ -1475,12 +1476,12 @@ def build_advanced_kundali_svg(birth_bodies, transit_bodies, asc_sign, tags_by_h
         entries = [(x, "b") for x in by_house[h]["b"]] + [(x, "t") for x in by_house[h]["t"]]
         n_planets = len(entries)
         row_h = base_font * 1.55
-        label_clearance = 22 * font_scale
+        label_clearance = 24
         start_y = cy_h - (n_planets * row_h) / 2 - label_clearance
-        parts.append(f'<text x="{cx_h:.1f}" y="{start_y - 10*font_scale:.1f}" text-anchor="middle" font-size="{9*font_scale:.1f}" '
-                      f'fill="{C["muted"]}" font-family="monospace">H{h} {SIGNS_ASCII[sign_idx][:3]}</text>')
+        parts.append(f'<text x="{cx_h:.1f}" y="{start_y - 12:.1f}" text-anchor="middle" font-size="13" font-weight="700" '
+                      f'fill="{C["muted"]}" font-family="monospace">{sign_idx + 1}</text>')
         for i, (x, kind) in enumerate(entries):
-            fill = C["sindoor"] if kind == "t" else (C["moon"] if x["key"] == "As" else C["ivory"])
+            fill = C["moon"] if x["key"] == "As" else PLANET_TRANSIT_COLORS.get(x["key"], C["ivory"])
             retro = " \u211e" if (x.get("retro") and x["key"] not in ("Ra", "Ke")) else ""
             prefix = "TR " if kind == "t" else ""
             parts.append(f'<text x="{cx_h:.1f}" y="{start_y + i*row_h:.1f}" text-anchor="middle" '
@@ -1706,19 +1707,17 @@ def render_advanced_chart_features(birth_chart: dict, birth_bodies: list, asc_si
             "A separate, additional chart \u2014 shows every toggle-enabled system above directly on the "
             "diamond chart, instead of as tables. Your main Kundali chart further up the page is untouched."
         )
-        acol1, acol2, acol3 = st.columns([1, 1, 1])
+        acol1, acol2 = st.columns([1, 1])
         with acol1:
             show_drishti = st.checkbox("Show Dṛṣṭi (aspect lines)", value=False, key="adv_show_drishti")
         with acol2:
             show_adv_transits = st.checkbox("Show Transits on this chart", value=True, key="adv_show_transits")
-        with acol3:
-            font_scale = st.slider("Font size", min_value=0.6, max_value=1.6, value=1.0, step=0.1, key="adv_font_scale")
 
         tags_by_house = compute_advanced_house_tags(birth_bodies, transit_bodies, asc_sign, toggles)
         drishti = compute_drishti(birth_bodies, asc_sign) if show_drishti else []
         adv_svg = build_advanced_kundali_svg(
             birth_bodies, transit_bodies, asc_sign, tags_by_house, drishti,
-            show_transits=show_adv_transits, font_scale=font_scale,
+            show_transits=show_adv_transits,
         )
         st.markdown(f'<div style="display:flex;justify-content:center;">{adv_svg}</div>', unsafe_allow_html=True)
 
